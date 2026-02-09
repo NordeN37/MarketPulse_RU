@@ -57,8 +57,18 @@ llm:
     timeout_seconds: 300  # CPU inference is slow, allow 5 min
     thinking: true   # enable thinking for deeper reasoning
 
-  # DeepSeek API — cheap external provider ($0.14/1M input, $0.28/1M output)
-  # OpenAI-compatible API, great for Russian text
+  # Qwen-Plus API (DashScope) — best Russian language quality ($0.40/1M input, $1.20/1M output)
+  # OpenAI-compatible, 119 languages, thinking mode support
+  qwen_plus:
+    name: "Qwen-Plus"
+    base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
+    api_key: "${DASHSCOPE_API_KEY}"
+    model: "qwen-plus"
+    max_tokens: 4096
+    timeout_seconds: 120
+
+  # DeepSeek API — cheapest external provider ($0.28/1M input, $0.42/1M output)
+  # OpenAI-compatible API, automatic prefix caching
   deepseek:
     name: "DeepSeek"
     base_url: "https://api.deepseek.com"

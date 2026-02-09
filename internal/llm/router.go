@@ -52,7 +52,8 @@ func (p *contextAwareProvider) ModelName() string {
 // Supports multiple providers with priority-based fallback:
 //   - Ollama fast model (qwen3:8b, thinking=off) — for routine tasks (~80%)
 //   - Ollama heavy model (qwen3:14b, thinking=on) — for complex tasks on CPU
-//   - DeepSeek API — cheap external provider for complex tasks
+//   - Qwen-Plus API (DashScope) — best Russian language, good price
+//   - DeepSeek API — cheapest external provider
 //   - Claude API — highest quality, most expensive
 //   - Any OpenAI-compatible provider
 type Router struct {
@@ -80,9 +81,21 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 	}
 
 	// Build the priority chain for heavy tasks.
-	// Order: OllamaHeavy → DeepSeek → Claude → other OpenAI-compat providers
+	// Order: OllamaHeavy → QwenPlus → DeepSeek → Claude → other OpenAI-compat providers
 	if r.ollamaHeavy != nil {
 		r.heavyProviders = append(r.heavyProviders, &contextAwareProvider{client: r.ollamaHeavy})
+	}
+
+	// Qwen-Plus (DashScope, OpenAI-compatible — best for Russian)
+	if cfg.QwenPlus.BaseURL != "" && cfg.QwenPlus.APIKey != "" {
+		qp := openai.NewClient(openai.Config{
+			BaseURL:    cfg.QwenPlus.BaseURL,
+			APIKey:     cfg.QwenPlus.APIKey,
+			Model:      cfg.QwenPlus.Model,
+			MaxTokens:  cfg.QwenPlus.MaxTokens,
+			TimeoutSec: cfg.QwenPlus.TimeoutSeconds,
+		})
+		r.heavyProviders = append(r.heavyProviders, qp)
 	}
 
 	// DeepSeek (OpenAI-compatible)

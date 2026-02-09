@@ -71,6 +71,8 @@ type LLMConfig struct {
 	Ollama OllamaConfig `yaml:"ollama"`
 	// Ollama heavy model for complex tasks on CPU (optional)
 	OllamaHeavy OllamaConfig `yaml:"ollama_heavy"`
+	// Qwen-Plus API (DashScope, OpenAI-compatible, best Russian language)
+	QwenPlus OpenAIProviderConfig `yaml:"qwen_plus"`
 	// DeepSeek API (OpenAI-compatible, cheap)
 	DeepSeek OpenAIProviderConfig `yaml:"deepseek"`
 	// Claude API (highest quality)
