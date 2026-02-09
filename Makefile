@@ -1,4 +1,4 @@
-.PHONY: build run-collector run-analyzer run-api run-alerter infra-up infra-down tidy test lint
+.PHONY: build run-collector run-analyzer run-api run-alerter run-trader infra-up infra-down tidy test lint
 
 # Build all binaries
 build: tidy
@@ -6,6 +6,7 @@ build: tidy
 	go build -o bin/analyzer ./cmd/analyzer
 	go build -o bin/api ./cmd/api
 	go build -o bin/alerter ./cmd/alerter
+	go build -o bin/trader ./cmd/trader
 
 # Run individual services
 run-collector:
@@ -19,6 +20,9 @@ run-api:
 
 run-alerter:
 	go run ./cmd/alerter -config configs/config.yaml
+
+run-trader:
+	go run ./cmd/trader -config configs/config.yaml
 
 # Infrastructure
 infra-up:

@@ -118,6 +118,7 @@ type NewsImpact struct {
 	NewsID          int64           `json:"news_id" db:"news_id"`
 	EntityType      EntityType      `json:"entity_type" db:"entity_type"`
 	EntityID        int64           `json:"entity_id" db:"entity_id"`
+	EntityName      string          `json:"entity_name" db:"entity_name"` // ticker or commodity code
 	Direction       ImpactDirection `json:"impact_direction" db:"impact_direction"`
 	Magnitude       float64         `json:"impact_magnitude" db:"impact_magnitude"` // 0.0 to 1.0
 	Timeframe       ImpactTimeframe `json:"impact_timeframe" db:"impact_timeframe"`

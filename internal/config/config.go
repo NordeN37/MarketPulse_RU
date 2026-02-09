@@ -20,6 +20,7 @@ type Config struct {
 	Alerts    AlertsConfig    `yaml:"alerts"`
 	API       APIConfig       `yaml:"api"`
 	MOEX      MOEXConfig      `yaml:"moex"`
+	Trading   TradingConfig   `yaml:"trading"`
 }
 
 type AppConfig struct {
@@ -192,6 +193,40 @@ func (m MOEXConfig) Timeout() time.Duration {
 		return 10 * time.Second
 	}
 	return d
+}
+
+// TradingConfig holds trading system configuration.
+type TradingConfig struct {
+	// Mode: "news", "ta", "combined"
+	Mode          string   `yaml:"mode"`
+	Tickers       []string `yaml:"tickers"`
+	CheckInterval string   `yaml:"check_interval"`
+	DryRun        bool     `yaml:"dry_run"`
+	InitialCash   float64  `yaml:"initial_cash"`
+	Risk          TradingRiskConfig     `yaml:"risk"`
+	Strategy      TradingStrategyConfig `yaml:"strategy"`
+}
+
+// TradingRiskConfig holds risk management parameters.
+type TradingRiskConfig struct {
+	MaxPositionSize   float64 `yaml:"max_position_size"`
+	MaxExposure       float64 `yaml:"max_exposure"`
+	MaxSectorExposure float64 `yaml:"max_sector_exposure"`
+	DailyLossLimit    float64 `yaml:"daily_loss_limit"`
+	DefaultStopLoss   float64 `yaml:"default_stop_loss"`
+	DefaultTakeProfit float64 `yaml:"default_take_profit"`
+	MaxOpenPositions  int     `yaml:"max_open_positions"`
+	MaxDrawdown       float64 `yaml:"max_drawdown"`
+}
+
+// TradingStrategyConfig holds strategy parameters.
+type TradingStrategyConfig struct {
+	NewsWeight        float64            `yaml:"news_weight"`
+	TAWeight          float64            `yaml:"ta_weight"`
+	MinSignalStrength float64            `yaml:"min_signal_strength"`
+	RequireConfluence bool               `yaml:"require_confluence"`
+	IndicatorWeights  map[string]float64 `yaml:"indicator_weights"`
+	Timeframes        []string           `yaml:"timeframes"`
 }
 
 // Load reads and parses the configuration from a YAML file.

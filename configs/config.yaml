@@ -124,3 +124,62 @@ moex:
   base_url: "https://iss.moex.com/iss"
   request_timeout: "10s"
   rate_limit_per_second: 5
+
+# =====================================================
+# Trading System Configuration
+# =====================================================
+trading:
+  # Mode: "news" (trade on news only), "ta" (technical analysis only), "combined" (both)
+  mode: "combined"
+
+  # Tickers to trade (MOEX TQBR board)
+  tickers:
+    - "SBER"
+    - "GAZP"
+    - "LKOH"
+    - "GMKN"
+    - "ROSN"
+    - "NVTK"
+    - "YNDX"
+    - "MGNT"
+    - "PLZL"
+    - "TATN"
+
+  # How often to check signals (TA mode)
+  check_interval: "5m"
+
+  # Dry run mode: simulate trades without real execution
+  dry_run: true
+
+  # Starting capital for position sizing (RUB)
+  initial_cash: 1000000
+
+  # Risk management
+  risk:
+    max_position_size: 0.05    # max 5% per trade
+    max_exposure: 0.50          # max 50% of portfolio in positions
+    max_sector_exposure: 0.20   # max 20% in one sector
+    daily_loss_limit: 0.02      # stop trading after 2% daily loss
+    default_stop_loss: 0.03     # 3% stop-loss
+    default_take_profit: 0.06   # 6% take-profit (2:1 ratio)
+    max_open_positions: 10
+    max_drawdown: 0.10          # 10% max drawdown circuit breaker
+
+  # Strategy parameters
+  strategy:
+    news_weight: 0.6
+    ta_weight: 0.4
+    min_signal_strength: 0.3
+    require_confluence: false   # set true to require both news + TA agree
+    timeframes:
+      - "1h"
+      - "1d"
+    indicator_weights:
+      ma: 0.15
+      rsi: 0.15
+      macd: 0.15
+      bollinger: 0.10
+      adx: 0.10
+      stochastic: 0.10
+      patterns: 0.15
+      volume: 0.10
