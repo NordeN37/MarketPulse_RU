@@ -62,14 +62,11 @@ func main() {
 	// Setup LLM router
 	router := llm.NewRouter(cfg.LLM, log)
 
-	if router.OllamaAvailable(ctx) {
-		log.Info("Ollama is available")
+	providers := router.AvailableProviders(ctx)
+	if len(providers) > 0 {
+		log.Info("LLM providers available", "providers", providers)
 	} else {
-		log.Warn("Ollama is not available — analysis will be limited")
-	}
-
-	if router.ClaudeAvailable() {
-		log.Info("Claude API is configured")
+		log.Warn("no LLM providers available — analysis will fail")
 	}
 
 	// Setup repositories and components

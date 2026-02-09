@@ -65,19 +65,19 @@ func main() {
 
 	var wg sync.WaitGroup
 
-	// Start Telegram listener (if configured)
-	if cfg.Telegram.BotToken != "" {
+	// Start Telegram userbot (MTProto) for channel monitoring
+	if cfg.Telegram.APIID != 0 && cfg.Telegram.APIHash != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			listener := telegram.NewListener(cfg.Telegram, pipeline.HandleNews, log)
-			if err := listener.Run(ctx); err != nil {
-				log.Error("telegram listener error", "error", err)
+			userbot := telegram.NewUserbot(cfg.Telegram, pipeline.HandleNews, log)
+			if err := userbot.Run(ctx); err != nil {
+				log.Error("telegram userbot error", "error", err)
 			}
 		}()
-		log.Info("telegram listener started")
+		log.Info("telegram userbot (MTProto) started")
 	} else {
-		log.Warn("telegram not configured, skipping")
+		log.Warn("telegram MTProto not configured (set api_id, api_hash, phone), skipping channel monitoring")
 	}
 
 	// Start RSS fetcher

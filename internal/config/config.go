@@ -54,17 +54,29 @@ type RedisConfig struct {
 }
 
 type TelegramConfig struct {
-	APIID       int      `yaml:"api_id"`
-	APIHash     string   `yaml:"api_hash"`
-	Phone       string   `yaml:"phone"`
-	Channels    []string `yaml:"channels"`
-	BotToken    string   `yaml:"bot_token"`
-	AlertChatID int64    `yaml:"alert_chat_id"`
+	// MTProto credentials for userbot mode (from https://my.telegram.org)
+	APIID   int    `yaml:"api_id"`
+	APIHash string `yaml:"api_hash"`
+	Phone   string `yaml:"phone"`
+	// Channels to monitor (userbot subscribes to them via MTProto)
+	Channels []string `yaml:"channels"`
+	// Bot token for sending alerts (separate from userbot)
+	BotToken    string `yaml:"bot_token"`
+	AlertChatID int64  `yaml:"alert_chat_id"`
 }
 
+// LLMConfig supports multiple providers with priority-based fallback.
 type LLMConfig struct {
+	// Ollama fast model for routine tasks (classify, NER, sentiment)
 	Ollama OllamaConfig `yaml:"ollama"`
+	// Ollama heavy model for complex tasks on CPU (optional)
+	OllamaHeavy OllamaConfig `yaml:"ollama_heavy"`
+	// DeepSeek API (OpenAI-compatible, cheap)
+	DeepSeek OpenAIProviderConfig `yaml:"deepseek"`
+	// Claude API (highest quality)
 	Claude ClaudeConfig `yaml:"claude"`
+	// Extra OpenAI-compatible providers (OpenRouter, local vLLM, etc.)
+	ExtraProviders []OpenAIProviderConfig `yaml:"extra_providers"`
 }
 
 type OllamaConfig struct {
@@ -74,15 +86,26 @@ type OllamaConfig struct {
 }
 
 func (o OllamaConfig) Timeout() time.Duration {
+	if o.TimeoutSeconds == 0 {
+		return 60 * time.Second
+	}
 	return time.Duration(o.TimeoutSeconds) * time.Second
 }
 
 type ClaudeConfig struct {
-	APIKey       string `yaml:"api_key"`
-	Model        string `yaml:"model"`
-	MaxTokens    int    `yaml:"max_tokens"`
-	DeepAnalysis bool   `yaml:"deep_analysis"`
-	DailyDigest  bool   `yaml:"daily_digest"`
+	APIKey    string `yaml:"api_key"`
+	Model     string `yaml:"model"`
+	MaxTokens int    `yaml:"max_tokens"`
+}
+
+// OpenAIProviderConfig works with any OpenAI-compatible API.
+type OpenAIProviderConfig struct {
+	Name           string `yaml:"name"`
+	BaseURL        string `yaml:"base_url"`
+	APIKey         string `yaml:"api_key"`
+	Model          string `yaml:"model"`
+	MaxTokens      int    `yaml:"max_tokens"`
+	TimeoutSeconds int    `yaml:"timeout_seconds"`
 }
 
 type CollectorConfig struct {

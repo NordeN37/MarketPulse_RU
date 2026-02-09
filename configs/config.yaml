@@ -21,36 +21,63 @@ redis:
   db: 0
 
 telegram:
-  # Telegram MTProto credentials (from https://my.telegram.org)
-  api_id: 0
-  api_hash: ""
-  phone: ""
-  # Channels to monitor
+  # MTProto userbot credentials (from https://my.telegram.org)
+  # The userbot subscribes to public channels as a regular user
+  api_id: ${TELEGRAM_API_ID:-0}
+  api_hash: "${TELEGRAM_API_HASH}"
+  phone: "${TELEGRAM_PHONE}"
+  # Channels to monitor (userbot joins them automatically)
   channels:
     - "@smartlabnews"
     - "@markettwits"
     - "@moex_news"
     - "@cbr_news"
     - "@interfax_news"
-    - "@raborbc"
+    - "@rbc_news"
     - "@vedomosti"
     - "@forbes_russia"
-  # Bot token for sending alerts
-  bot_token: ""
-  alert_chat_id: 0
+  # Bot token for SENDING alerts (separate from userbot)
+  bot_token: "${TELEGRAM_BOT_TOKEN}"
+  alert_chat_id: ${TELEGRAM_ALERT_CHAT_ID:-0}
 
 llm:
+  # Fast model for routine tasks (classify, NER, sentiment) — ~80% of load
   ollama:
     base_url: "http://localhost:11434"
     model: "qwen2.5:7b"
     timeout_seconds: 60
+
+  # Heavy model for complex tasks (deep analysis, digests) — CPU-only
+  # Recommended: qwen2.5:14b (~10GB RAM) or qwen2.5:32b (~20GB RAM)
+  ollama_heavy:
+    base_url: "http://localhost:11434"
+    model: "qwen2.5:14b"
+    timeout_seconds: 300  # CPU inference is slow, allow 5 min
+
+  # DeepSeek API — cheap external provider ($0.14/1M input, $0.28/1M output)
+  # OpenAI-compatible API, great for Russian text
+  deepseek:
+    name: "DeepSeek"
+    base_url: "https://api.deepseek.com"
+    api_key: "${DEEPSEEK_API_KEY}"
+    model: "deepseek-chat"
+    max_tokens: 4096
+    timeout_seconds: 120
+
+  # Claude API — highest quality, most expensive (use sparingly)
   claude:
-    api_key: ""
+    api_key: "${CLAUDE_API_KEY}"
     model: "claude-sonnet-4-20250514"
     max_tokens: 4096
-    # Tasks that go to Claude instead of Ollama
-    deep_analysis: true
-    daily_digest: true
+
+  # Additional OpenAI-compatible providers (OpenRouter, local vLLM, etc.)
+  # extra_providers:
+  #   - name: "OpenRouter"
+  #     base_url: "https://openrouter.ai/api"
+  #     api_key: "${OPENROUTER_API_KEY}"
+  #     model: "meta-llama/llama-3.1-70b-instruct"
+  #     max_tokens: 4096
+  #     timeout_seconds: 120
 
 collector:
   # How often to poll RSS feeds (Telegram is push-based)
