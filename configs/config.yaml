@@ -42,17 +42,20 @@ telegram:
 
 llm:
   # Fast model for routine tasks (classify, NER, sentiment) — ~80% of load
+  # Qwen3-8B ≈ Qwen2.5-14B quality, ~5GB RAM
   ollama:
     base_url: "http://localhost:11434"
-    model: "qwen2.5:7b"
+    model: "qwen3:8b"
     timeout_seconds: 60
+    thinking: false  # disable thinking for fast JSON extraction
 
   # Heavy model for complex tasks (deep analysis, digests) — CPU-only
-  # Recommended: qwen2.5:14b (~10GB RAM) or qwen2.5:32b (~20GB RAM)
+  # Qwen3-14B ≈ Qwen2.5-32B quality, ~10GB RAM
   ollama_heavy:
     base_url: "http://localhost:11434"
-    model: "qwen2.5:14b"
+    model: "qwen3:14b"
     timeout_seconds: 300  # CPU inference is slow, allow 5 min
+    thinking: true   # enable thinking for deeper reasoning
 
   # DeepSeek API — cheap external provider ($0.14/1M input, $0.28/1M output)
   # OpenAI-compatible API, great for Russian text

@@ -83,6 +83,17 @@ type OllamaConfig struct {
 	BaseURL        string `yaml:"base_url"`
 	Model          string `yaml:"model"`
 	TimeoutSeconds int    `yaml:"timeout_seconds"`
+	// Thinking controls Qwen3's reasoning mode.
+	// false = fast non-thinking (for classification), true = deep reasoning (for analysis).
+	Thinking *bool `yaml:"thinking"`
+}
+
+// ThinkingEnabled returns whether thinking mode is enabled (default: false).
+func (o OllamaConfig) ThinkingEnabled() bool {
+	if o.Thinking == nil {
+		return false
+	}
+	return *o.Thinking
 }
 
 func (o OllamaConfig) Timeout() time.Duration {

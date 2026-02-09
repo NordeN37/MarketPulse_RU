@@ -50,8 +50,8 @@ func (p *contextAwareProvider) ModelName() string {
 // Router directs LLM tasks to the appropriate backend.
 //
 // Supports multiple providers with priority-based fallback:
-//   - Ollama fast model (qwen2.5:7b) — for routine tasks
-//   - Ollama heavy model (qwen2.5:14b/32b) — for complex tasks on CPU
+//   - Ollama fast model (qwen3:8b, thinking=off) — for routine tasks (~80%)
+//   - Ollama heavy model (qwen3:14b, thinking=on) — for complex tasks on CPU
 //   - DeepSeek API — cheap external provider for complex tasks
 //   - Claude API — highest quality, most expensive
 //   - Any OpenAI-compatible provider
