@@ -1,0 +1,30 @@
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Config with secrets
+configs/config.local.yaml
+
+# Telegram session
+telegram_session*
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
