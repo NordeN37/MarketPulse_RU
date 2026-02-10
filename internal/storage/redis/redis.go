@@ -173,3 +173,75 @@ func (c *Client) SubscribeReread(ctx context.Context) (<-chan string, error) {
 
 	return ch, nil
 }
+
+// ---- T-Invest token management ----
+
+// TInvestConfig stores T-Invest API configuration.
+type TInvestConfig struct {
+	Token   string `json:"token"`
+	Sandbox bool   `json:"sandbox"`
+}
+
+// WriteTInvestConfig saves T-Invest configuration (token + mode).
+func (c *Client) WriteTInvestConfig(ctx context.Context, cfg TInvestConfig) error {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return c.rdb.Set(ctx, "tinvest:config", data, 0).Err() // no expiry
+}
+
+// ReadTInvestConfig reads stored T-Invest configuration.
+func (c *Client) ReadTInvestConfig(ctx context.Context) (*TInvestConfig, error) {
+	data, err := c.rdb.Get(ctx, "tinvest:config").Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var cfg TInvestConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// DeleteTInvestConfig removes stored T-Invest configuration.
+func (c *Client) DeleteTInvestConfig(ctx context.Context) error {
+	return c.rdb.Del(ctx, "tinvest:config").Err()
+}
+
+// ---- T-Invest account-strategy mapping ----
+
+// TInvestAccountStrategy maps an account to a trading strategy.
+type TInvestAccountStrategy struct {
+	AccountID string `json:"account_id"`
+	Strategy  string `json:"strategy"` // "news", "ta", "combined", "" (disabled)
+	Enabled   bool   `json:"enabled"`
+}
+
+// WriteTInvestStrategies saves account-strategy mappings.
+func (c *Client) WriteTInvestStrategies(ctx context.Context, strategies []TInvestAccountStrategy) error {
+	data, err := json.Marshal(strategies)
+	if err != nil {
+		return err
+	}
+	return c.rdb.Set(ctx, "tinvest:strategies", data, 0).Err()
+}
+
+// ReadTInvestStrategies reads account-strategy mappings.
+func (c *Client) ReadTInvestStrategies(ctx context.Context) ([]TInvestAccountStrategy, error) {
+	data, err := c.rdb.Get(ctx, "tinvest:strategies").Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var strategies []TInvestAccountStrategy
+	if err := json.Unmarshal(data, &strategies); err != nil {
+		return nil, err
+	}
+	return strategies, nil
+}

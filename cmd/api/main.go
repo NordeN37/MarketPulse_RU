@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,8 +20,10 @@ import (
 	"github.com/NordeN37/MarketPulse_RU/internal/config"
 	"github.com/NordeN37/MarketPulse_RU/internal/domain"
 	"github.com/NordeN37/MarketPulse_RU/internal/market/moex"
+	"github.com/NordeN37/MarketPulse_RU/internal/market/tinvest"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/postgres"
 	"github.com/NordeN37/MarketPulse_RU/internal/stream"
+	"github.com/NordeN37/MarketPulse_RU/internal/trading"
 	redisclient "github.com/NordeN37/MarketPulse_RU/internal/storage/redis"
 )
 
@@ -82,6 +85,25 @@ func main() {
 		if err := moexClient.Authenticate(ctx, cfg.MOEX.PassportLogin, cfg.MOEX.PassportPassword); err != nil {
 			log.Warn("MOEX passport auth failed — order book unavailable", "error", err)
 		}
+	}
+
+	// ---- T-Invest API Manager ----
+	tiManager := tinvest.NewManager(log)
+	tiStreamer := tinvest.NewStreamer(tiManager, log)
+	// Restore token from Redis (if previously saved via admin UI)
+	if tiCfg, err := cache.ReadTInvestConfig(ctx); err == nil && tiCfg != nil && tiCfg.Token != "" {
+		if err := tiManager.SetToken(ctx, tiCfg.Token, tiCfg.Sandbox); err != nil {
+			log.Warn("T-Invest auto-connect failed (saved token)", "error", err)
+		} else {
+			// Auto-start streaming for monitored instruments
+			go startTInvestStream(ctx, tiManager, tiStreamer, companyRepo, log)
+		}
+	}
+
+	// ---- Portfolio sync (real broker → cache) ----
+	portfolioSync := trading.NewPortfolioSync(tiManager, cache, log)
+	if tiManager.Connected() {
+		go portfolioSync.Run(ctx, 30*time.Second)
 	}
 
 	// Start SSE quote broadcaster (polls MOEX every 10s, pushes via SSE)
@@ -713,6 +735,377 @@ func main() {
 	})
 
 	// =====================================================
+	// T-Invest API: connection, market data, trading
+	// =====================================================
+
+	// SSE: T-Invest real-time price stream
+	mux.Handle("GET /api/stream/tinvest", tiStreamer)
+
+	// T-Invest streamer status + latest prices (REST fallback)
+	mux.HandleFunc("GET /api/tinvest/stream-status", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"connected": tiManager.Connected(),
+			"streaming": tiStreamer.Running(),
+			"prices":    tiStreamer.GetLatestPrices(),
+		})
+	})
+
+	// Start/restart T-Invest gRPC stream
+	mux.HandleFunc("POST /api/admin/tinvest/stream/start", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		go startTInvestStream(ctx, tiManager, tiStreamer, companyRepo, log)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "starting"})
+	})
+
+	// Stop T-Invest gRPC stream
+	mux.HandleFunc("POST /api/admin/tinvest/stream/stop", func(w http.ResponseWriter, r *http.Request) {
+		tiStreamer.Stop()
+		writeJSON(w, http.StatusOK, map[string]string{"status": "stopped"})
+	})
+
+	// Status
+	mux.HandleFunc("GET /api/admin/tinvest/status", func(w http.ResponseWriter, r *http.Request) {
+		status := tiManager.GetStatus()
+		// Augment with saved strategies and stream info
+		strategies, _ := cache.ReadTInvestStrategies(r.Context())
+		writeJSON(w, http.StatusOK, map[string]any{
+			"connected":    status.Connected,
+			"mode":         status.Mode,
+			"token_masked": status.TokenMasked,
+			"accounts":     status.Accounts,
+			"strategies":   strategies,
+			"streaming":    tiStreamer.Running(),
+		})
+	})
+
+	// Connect (set token)
+	mux.HandleFunc("POST /api/admin/tinvest/connect", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Token   string `json:"token"`
+			Sandbox bool   `json:"sandbox"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Token == "" {
+			writeError(w, http.StatusBadRequest, "укажите token в теле запроса")
+			return
+		}
+
+		if err := tiManager.SetToken(r.Context(), body.Token, body.Sandbox); err != nil {
+			writeError(w, http.StatusBadGateway, "Не удалось подключиться: "+err.Error())
+			return
+		}
+
+		// Save to Redis for auto-reconnect on restart
+		if err := cache.WriteTInvestConfig(r.Context(), redisclient.TInvestConfig{
+			Token:   body.Token,
+			Sandbox: body.Sandbox,
+		}); err != nil {
+			log.Warn("failed to save T-Invest config to Redis", "error", err)
+		}
+
+		// Auto-start streaming and portfolio sync
+		go startTInvestStream(ctx, tiManager, tiStreamer, companyRepo, log)
+		go portfolioSync.Run(ctx, 30*time.Second)
+
+		writeJSON(w, http.StatusOK, tiManager.GetStatus())
+	})
+
+	// Disconnect
+	mux.HandleFunc("POST /api/admin/tinvest/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		tiManager.Disconnect()
+		if err := cache.DeleteTInvestConfig(r.Context()); err != nil {
+			log.Warn("failed to delete T-Invest config from Redis", "error", err)
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "disconnected"})
+	})
+
+	// Accounts
+	mux.HandleFunc("GET /api/admin/tinvest/accounts", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		accounts, err := tiManager.GetAccounts()
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, accounts)
+	})
+
+	// Save account-strategy mappings
+	mux.HandleFunc("POST /api/admin/tinvest/strategies", func(w http.ResponseWriter, r *http.Request) {
+		var body []redisclient.TInvestAccountStrategy
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if err := cache.WriteTInvestStrategies(r.Context(), body); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	})
+
+	// Get account-strategy mappings
+	mux.HandleFunc("GET /api/admin/tinvest/strategies", func(w http.ResponseWriter, r *http.Request) {
+		strategies, err := cache.ReadTInvestStrategies(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if strategies == nil {
+			strategies = []redisclient.TInvestAccountStrategy{}
+		}
+		writeJSON(w, http.StatusOK, strategies)
+	})
+
+	// Instruments (shares list)
+	mux.HandleFunc("GET /api/tinvest/instruments", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		// Cache for 5 min
+		var instruments []tinvest.InstrumentInfo
+		if found, _ := cache.CacheGet(r.Context(), "tinvest:shares", &instruments); found {
+			writeJSON(w, http.StatusOK, instruments)
+			return
+		}
+		instruments, err := tiManager.GetShares()
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		cache.CacheSet(r.Context(), "tinvest:shares", instruments, 5*time.Minute)
+		writeJSON(w, http.StatusOK, instruments)
+	})
+
+	// Find instrument by ticker
+	mux.HandleFunc("GET /api/tinvest/instrument/{ticker}", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		ticker := r.PathValue("ticker")
+		classCode := r.URL.Query().Get("class_code")
+		if classCode == "" {
+			classCode = "TQBR"
+		}
+		inst, err := tiManager.FindInstrumentByTicker(ticker, classCode)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, inst)
+	})
+
+	// Last prices
+	mux.HandleFunc("GET /api/tinvest/prices", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		idsStr := r.URL.Query().Get("ids")
+		if idsStr == "" {
+			writeError(w, http.StatusBadRequest, "укажите ids (через запятую)")
+			return
+		}
+		ids := splitCSV(idsStr)
+		prices, err := tiManager.GetLastPrices(ids)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, prices)
+	})
+
+	// T-Invest Order book
+	mux.HandleFunc("GET /api/tinvest/orderbook/{instrumentId}", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		instrumentID := r.PathValue("instrumentId")
+		depth, _ := strconv.ParseInt(r.URL.Query().Get("depth"), 10, 32)
+		if depth <= 0 {
+			depth = 20
+		}
+		ob, err := tiManager.GetOrderBook(instrumentID, int32(depth))
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, ob)
+	})
+
+	// T-Invest Candles
+	mux.HandleFunc("GET /api/tinvest/candles/{instrumentId}", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		instrumentID := r.PathValue("instrumentId")
+		interval := r.URL.Query().Get("interval")
+		if interval == "" {
+			interval = "1h"
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days <= 0 || days > 365 {
+			days = 30
+		}
+		now := time.Now()
+		from := now.AddDate(0, 0, -days)
+		candles, err := tiManager.GetCandles(instrumentID, interval, from, now)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, candles)
+	})
+
+	// Portfolio
+	mux.HandleFunc("GET /api/tinvest/portfolio/{accountId}", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		accountID := r.PathValue("accountId")
+		portfolio, err := tiManager.GetPortfolio(accountID)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, portfolio)
+	})
+
+	// Margin attributes
+	mux.HandleFunc("GET /api/tinvest/margin/{accountId}", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		accountID := r.PathValue("accountId")
+		margin, err := tiManager.GetMarginAttributes(accountID)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, margin)
+	})
+
+	// Active orders
+	mux.HandleFunc("GET /api/tinvest/orders/{accountId}", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		accountID := r.PathValue("accountId")
+		orders, err := tiManager.GetActiveOrders(accountID)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		if orders == nil {
+			orders = []tinvest.ActiveOrder{}
+		}
+		writeJSON(w, http.StatusOK, orders)
+	})
+
+	// Place order
+	mux.HandleFunc("POST /api/tinvest/orders", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		var req tinvest.OrderRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if req.AccountID == "" || req.InstrumentID == "" || req.Quantity <= 0 {
+			writeError(w, http.StatusBadRequest, "account_id, instrument_id, quantity обязательны")
+			return
+		}
+		result, err := tiManager.PostOrder(req)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	})
+
+	// Cancel order
+	mux.HandleFunc("POST /api/tinvest/orders/cancel", func(w http.ResponseWriter, r *http.Request) {
+		if !tiManager.Connected() {
+			writeError(w, http.StatusPreconditionFailed, "T-Invest не подключен")
+			return
+		}
+		var body struct {
+			AccountID string `json:"account_id"`
+			OrderID   string `json:"order_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.AccountID == "" || body.OrderID == "" {
+			writeError(w, http.StatusBadRequest, "account_id и order_id обязательны")
+			return
+		}
+		if err := tiManager.CancelOrder(body.AccountID, body.OrderID); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "cancelled"})
+	})
+
+	// =====================================================
+	// Broker portfolio sync (real-time cached from T-Invest)
+	// =====================================================
+	mux.HandleFunc("GET /api/tinvest/broker-portfolios", func(w http.ResponseWriter, r *http.Request) {
+		cached, err := portfolioSync.GetCachedPortfolios(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if cached == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"updated_at": nil,
+				"accounts":   []any{},
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, cached)
+	})
+
+	// =====================================================
+	// Withdrawal configuration
+	// =====================================================
+	mux.HandleFunc("GET /api/admin/tinvest/withdrawal", func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := trading.ReadWithdrawalConfig(r.Context(), cache)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if cfg == nil {
+			cfg = &trading.WithdrawalConfig{}
+		}
+		writeJSON(w, http.StatusOK, cfg)
+	})
+
+	mux.HandleFunc("POST /api/admin/tinvest/withdrawal", func(w http.ResponseWriter, r *http.Request) {
+		var cfg trading.WithdrawalConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if err := trading.WriteWithdrawalConfig(r.Context(), cache, cfg); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	})
+
+	// =====================================================
 	// Static files — serve Vue.js SPA from web/
 	// =====================================================
 	webFS := http.FileServer(http.Dir("web"))
@@ -747,6 +1140,45 @@ func main() {
 	log.Info("API server stopped")
 }
 
+// startTInvestStream resolves instrument UIDs for monitored companies and starts the gRPC stream.
+func startTInvestStream(ctx context.Context, mgr *tinvest.Manager, streamer *tinvest.Streamer, compRepo *postgres.CompanyRepo, log *slog.Logger) {
+	if streamer.Running() {
+		streamer.Stop()
+		time.Sleep(time.Second)
+	}
+
+	tickers, err := compRepo.GetAllTickers(ctx)
+	if err != nil {
+		log.Warn("T-Invest stream: failed to get tickers", "error", err)
+		return
+	}
+	if len(tickers) == 0 {
+		log.Warn("T-Invest stream: no tickers to subscribe")
+		return
+	}
+
+	// Resolve tickers to instrument UIDs via T-Invest API
+	var instrumentIDs []string
+	for _, ticker := range tickers {
+		inst, err := mgr.FindInstrumentByTicker(ticker, "TQBR")
+		if err != nil {
+			log.Debug("T-Invest stream: instrument not found", "ticker", ticker, "error", err)
+			continue
+		}
+		instrumentIDs = append(instrumentIDs, inst.UID)
+	}
+
+	if len(instrumentIDs) == 0 {
+		log.Warn("T-Invest stream: no instruments resolved")
+		return
+	}
+
+	log.Info("T-Invest stream: starting", "instruments", len(instrumentIDs), "tickers", len(tickers))
+	if err := streamer.Start(ctx, instrumentIDs); err != nil {
+		log.Warn("T-Invest stream: failed to start", "error", err)
+	}
+}
+
 func writeJSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -755,6 +1187,18 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
+}
+
+func splitCSV(s string) []string {
+	parts := strings.Split(s, ",")
+	var result []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			result = append(result, p)
+		}
+	}
+	return result
 }
 
 func corsMiddleware(origins []string, next http.Handler) http.Handler {

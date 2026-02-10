@@ -199,6 +199,118 @@
         /** Order book (стакан) + anomaly detection */
         getOrderBook: function (ticker) {
             return request('/api/orderbook/' + encodeURIComponent(ticker));
+        },
+
+        // ---- T-Invest API ----
+
+        /** T-Invest: connection status */
+        getTInvestStatus: function () {
+            return request('/api/admin/tinvest/status');
+        },
+
+        /** T-Invest: connect with token */
+        tInvestConnect: function (token, sandbox) {
+            return postJSON('/api/admin/tinvest/connect', { token: token, sandbox: !!sandbox });
+        },
+
+        /** T-Invest: disconnect */
+        tInvestDisconnect: function () {
+            return postJSON('/api/admin/tinvest/disconnect', {});
+        },
+
+        /** T-Invest: list accounts */
+        getTInvestAccounts: function () {
+            return request('/api/admin/tinvest/accounts');
+        },
+
+        /** T-Invest: save account-strategy mappings */
+        saveTInvestStrategies: function (strategies) {
+            return postJSON('/api/admin/tinvest/strategies', strategies);
+        },
+
+        /** T-Invest: get account-strategy mappings */
+        getTInvestStrategies: function () {
+            return request('/api/admin/tinvest/strategies');
+        },
+
+        /** T-Invest: get instruments (shares) */
+        getTInvestInstruments: function () {
+            return request('/api/tinvest/instruments');
+        },
+
+        /** T-Invest: find instrument by ticker */
+        getTInvestInstrument: function (ticker, classCode) {
+            return request('/api/tinvest/instrument/' + encodeURIComponent(ticker) + qs({ class_code: classCode }));
+        },
+
+        /** T-Invest: last prices */
+        getTInvestPrices: function (ids) {
+            return request('/api/tinvest/prices' + qs({ ids: ids.join(',') }));
+        },
+
+        /** T-Invest: order book */
+        getTInvestOrderBook: function (instrumentId, depth) {
+            return request('/api/tinvest/orderbook/' + encodeURIComponent(instrumentId) + qs({ depth: depth }));
+        },
+
+        /** T-Invest: candles */
+        getTInvestCandles: function (instrumentId, interval, days) {
+            return request('/api/tinvest/candles/' + encodeURIComponent(instrumentId) + qs({ interval: interval, days: days }));
+        },
+
+        /** T-Invest: portfolio for account */
+        getTInvestPortfolio: function (accountId) {
+            return request('/api/tinvest/portfolio/' + encodeURIComponent(accountId));
+        },
+
+        /** T-Invest: margin attributes for account */
+        getTInvestMargin: function (accountId) {
+            return request('/api/tinvest/margin/' + encodeURIComponent(accountId));
+        },
+
+        /** T-Invest: active orders for account */
+        getTInvestOrders: function (accountId) {
+            return request('/api/tinvest/orders/' + encodeURIComponent(accountId));
+        },
+
+        /** T-Invest: place order */
+        tInvestPlaceOrder: function (order) {
+            return postJSON('/api/tinvest/orders', order);
+        },
+
+        /** T-Invest: cancel order */
+        tInvestCancelOrder: function (accountId, orderId) {
+            return postJSON('/api/tinvest/orders/cancel', { account_id: accountId, order_id: orderId });
+        },
+
+        /** T-Invest: cached broker portfolios */
+        getBrokerPortfolios: function () {
+            return request('/api/tinvest/broker-portfolios');
+        },
+
+        /** T-Invest: withdrawal config */
+        getWithdrawalConfig: function () {
+            return request('/api/admin/tinvest/withdrawal');
+        },
+
+        /** T-Invest: save withdrawal config */
+        saveWithdrawalConfig: function (cfg) {
+            return postJSON('/api/admin/tinvest/withdrawal', cfg);
+        },
+
+        /** T-Invest: stream status + prices */
+        getTInvestStreamStatus: function () {
+            return request('/api/tinvest/stream-status');
+        },
+
+        /** T-Invest: start gRPC stream */
+        startTInvestStream: function () {
+            return postJSON('/api/admin/tinvest/stream/start', {});
+        },
+
+        /** T-Invest: stop gRPC stream */
+        stopTInvestStream: function () {
+            return postJSON('/api/admin/tinvest/stream/stop', {});
         }
     };
 

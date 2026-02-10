@@ -80,6 +80,30 @@ func (r *SignalRepo) GetBySource(ctx context.Context, source string, limit int) 
 	return scanSignals(rows)
 }
 
+// MarkExecuted marks a signal as executed.
+func (r *SignalRepo) MarkExecuted(ctx context.Context, id int64) error {
+	_, err := r.db.Pool.Exec(ctx, `UPDATE trading_signals SET executed = true WHERE id = $1`, id)
+	if err != nil {
+		return fmt.Errorf("marking signal executed: %w", err)
+	}
+	return nil
+}
+
+// GetPendingBySource returns unexecuted, unexpired signals for a given source.
+func (r *SignalRepo) GetPendingBySource(ctx context.Context, source string, limit int) ([]domain.Signal, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT id, ticker, direction, source, strength, price, reason, executed, created_at, expires_at
+		FROM trading_signals
+		WHERE source = $1 AND executed = false AND expires_at > NOW()
+		ORDER BY strength DESC, created_at DESC
+		LIMIT $2`, source, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying pending signals: %w", err)
+	}
+	defer rows.Close()
+	return scanSignals(rows)
+}
+
 // CountSince returns signal count since a time.
 func (r *SignalRepo) CountSince(ctx context.Context, since time.Time) (int64, error) {
 	var count int64
