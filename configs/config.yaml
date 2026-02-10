@@ -46,10 +46,10 @@ telegram:
 
 llm:
   # Fast model for routine tasks (classify, NER, sentiment) — ~80% of load
-  # Qwen3-8B ≈ Qwen2.5-14B quality, ~5GB RAM
+  # Using same qwen3:14b for both fast and heavy to avoid pulling two models
   ollama:
     base_url: "http://localhost:11434"
-    model: "qwen3:8b"
+    model: "qwen3:14b"
     timeout_seconds: 60
     thinking: false  # disable thinking for fast JSON extraction
 
