@@ -18,14 +18,45 @@ type Feed struct {
 	Channel string // logical channel name for grouping
 }
 
-// DefaultFeeds returns standard Russian financial RSS feeds.
+// DefaultFeeds returns standard financial RSS feeds.
+// Russian sources provide full-text articles; international sources provide headlines/excerpts (paywall).
+// Bloomberg and Reuters have no native RSS; we use Google News RSS filtered by domain.
 func DefaultFeeds() []Feed {
 	return []Feed{
+		// ── Российские источники (полные тексты) ─────────────────
 		{Name: "РБК", URL: "https://rssexport.rbc.ru/rbcnews/news/30/full.rss", Channel: "rbc"},
 		{Name: "Интерфакс", URL: "https://www.interfax.ru/rss.asp", Channel: "interfax"},
 		{Name: "ТАСС Экономика", URL: "https://tass.ru/rss/v2.xml", Channel: "tass"},
 		{Name: "Ведомости", URL: "https://www.vedomosti.ru/rss/news", Channel: "vedomosti"},
 		{Name: "Банк России", URL: "https://cbr.ru/rss/eventrss", Channel: "cbr"},
+
+		// ПРАЙМ (1prime.ru) — агентство экономической информации
+		{Name: "ПРАЙМ", URL: "https://1prime.ru/export/rss2/index.xml", Channel: "prime"},
+		{Name: "ПРАЙМ Рынки", URL: "https://1prime.ru/export/rss2/Financial_market/index.xml", Channel: "prime_markets"},
+		{Name: "ПРАЙМ Экономика", URL: "https://1prime.ru/export/rss2/state_regulation/index.xml", Channel: "prime_economy"},
+		{Name: "ПРАЙМ Энергетика", URL: "https://1prime.ru/export/rss2/energy/index.xml", Channel: "prime_energy"},
+
+		// Коммерсантъ
+		{Name: "Коммерсантъ", URL: "https://www.kommersant.ru/RSS/main.xml", Channel: "kommersant"},
+		{Name: "Коммерсантъ Новости", URL: "https://www.kommersant.ru/RSS/news.xml", Channel: "kommersant_news"},
+
+		// ── Международные источники (заголовки, англ.) ───────────
+		// Wall Street Journal
+		{Name: "WSJ Markets", URL: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", Channel: "wsj_markets"},
+		{Name: "WSJ Business", URL: "https://feeds.a.dj.com/rss/WSJcomUSBusiness.xml", Channel: "wsj_business"},
+		{Name: "WSJ World", URL: "https://feeds.a.dj.com/rss/RSSWorldNews.xml", Channel: "wsj_world"},
+
+		// Financial Times
+		{Name: "FT Markets", URL: "https://www.ft.com/markets?format=rss", Channel: "ft_markets"},
+		{Name: "FT Companies", URL: "https://www.ft.com/companies?format=rss", Channel: "ft_companies"},
+		{Name: "FT Economy", URL: "https://www.ft.com/global-economy?format=rss", Channel: "ft_economy"},
+		{Name: "FT Emerging Markets", URL: "https://www.ft.com/emerging-markets?format=rss", Channel: "ft_emerging"},
+
+		// Bloomberg (нет нативного RSS — используем Google News как прокси)
+		{Name: "Bloomberg via Google", URL: "https://news.google.com/rss/search?q=when:24h+allinurl:bloomberg.com&ceid=US:en&hl=en-US&gl=US", Channel: "bloomberg"},
+
+		// Reuters (убрали RSS в 2020 — используем Google News как прокси)
+		{Name: "Reuters via Google", URL: "https://news.google.com/rss/search?q=when:24h+allinurl:reuters.com&ceid=US:en&hl=en-US&gl=US", Channel: "reuters"},
 	}
 }
 
