@@ -66,6 +66,9 @@
             var newsLoading = ref(false);
             var signalsLoading = ref(false);
 
+            var lastUpdated = ref(null);
+            var refreshTimer = null;
+
             /* Chart refs */
             var chartInstance = null;
             var candleSeries  = null;
@@ -243,6 +246,11 @@
                 return quote.value.change || quote.value.CHANGE || quote.value.lasttoprevprice || null;
             }
 
+            async function silentRefresh() {
+                await Promise.allSettled([fetchQuote(), fetchNews(), fetchSignals()]);
+                lastUpdated.value = new Date();
+            }
+
             /* Watchers */
             watch([interval, days], function () { loadCandles(); });
             watch(function () { return route.params.ticker; }, function (newTicker) {
@@ -263,9 +271,13 @@
                 });
             }
 
-            onMounted(init);
+            onMounted(function () {
+                init();
+                refreshTimer = setInterval(silentRefresh, 30000);
+            });
 
             onBeforeUnmount(function () {
+                if (refreshTimer) clearInterval(refreshTimer);
                 if (resizeObserver) resizeObserver.disconnect();
                 if (chartInstance) { chartInstance.remove(); chartInstance = null; }
             });
@@ -289,6 +301,7 @@
                 getChange: getChange,
                 fmtChange: fmtChange,
                 changeClass: changeClass,
+                lastUpdated: lastUpdated,
                 fmtTime: fmtTime,
                 loadCandles: loadCandles
             };
@@ -310,6 +323,10 @@
                 <span class="fs-4 fw-bold" :class="changeClass(getChange())">{{ getPrice() }}</span>
                 <span class="ms-2" :class="changeClass(getChange())" style="font-size:0.9rem;">{{ fmtChange(getChange()) }}</span>
                 <span class="text-muted ms-1" style="font-size:0.75rem;">RUB</span>
+                <span v-if="lastUpdated" class="ms-2 text-muted" style="font-size:0.7rem;">
+                    <span class="mp-live-dot"></span>
+                    {{ lastUpdated.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }}
+                </span>
             </div>
             <div v-if="company && company.sector" class="text-muted" style="font-size:0.8rem;">
                 <i class="bi bi-building me-1"></i>{{ company.sector }}

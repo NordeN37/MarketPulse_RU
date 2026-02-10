@@ -175,9 +175,11 @@
                 });
             }
 
-            /* Fetch data */
-            async function fetchAll() {
-                loading.value = true;
+            var lastUpdated = ref(null);
+
+            /* Fetch data (silent=true skips loading spinner for auto-refresh) */
+            async function fetchAll(silent) {
+                if (!silent) loading.value = true;
                 var promises = [];
 
                 promises.push(
@@ -250,6 +252,7 @@
 
                 await Promise.allSettled(quotePromises);
                 loading.value = false;
+                lastUpdated.value = new Date();
             }
 
             var refreshInterval = null;
@@ -258,7 +261,7 @@
                 fetchAll().then(function () {
                     nextTick(function () { initGrid(); });
                 });
-                refreshInterval = setInterval(fetchAll, 60000);
+                refreshInterval = setInterval(function () { fetchAll(true); }, 30000);
             });
 
             onBeforeUnmount(function () {
@@ -286,6 +289,7 @@
                 severityClass: severityClass,
                 heatColor: heatColor,
                 fmtTime: fmtTime,
+                lastUpdated: lastUpdated,
                 fmtChange: fmtChange,
                 changeClass: changeClass
             };
@@ -293,7 +297,13 @@
         template: `
 <div>
     <div class="mp-page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-        <h1><i class="bi bi-speedometer2 me-2"></i>Панель управления</h1>
+        <div>
+            <h1 class="d-inline"><i class="bi bi-speedometer2 me-2"></i>Панель управления</h1>
+            <span v-if="lastUpdated" class="ms-3 text-muted" style="font-size:0.7rem;">
+                <span class="mp-live-dot"></span>
+                {{ lastUpdated.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }}
+            </span>
+        </div>
         <div class="dropdown">
             <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-grid-3x3-gap me-1"></i>Виджеты

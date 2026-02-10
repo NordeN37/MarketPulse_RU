@@ -699,3 +699,19 @@ html, body {
     border-radius: 6px;
     background: var(--mp-bg-tertiary);
 }
+
+/* Live update indicator */
+.mp-live-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--mp-green);
+    margin-right: 4px;
+    vertical-align: middle;
+    animation: mp-pulse 2s ease-in-out infinite;
+}
+@keyframes mp-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}

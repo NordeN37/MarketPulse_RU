@@ -4,10 +4,11 @@
 (function () {
     'use strict';
 
-    var ref       = Vue.ref;
-    var computed  = Vue.computed;
-    var onMounted = Vue.onMounted;
-    var watch     = Vue.watch;
+    var ref             = Vue.ref;
+    var computed        = Vue.computed;
+    var onMounted       = Vue.onMounted;
+    var onBeforeUnmount = Vue.onBeforeUnmount;
+    var watch           = Vue.watch;
 
     var SECTOR_LABELS = {
         'OIL_GAS':      'Нефть и газ',
@@ -38,6 +39,8 @@
             var search = ref('');
             var sectorFilter = ref('');
             var loading = ref(true);
+            var lastUpdated = ref(null);
+            var refreshTimer = null;
             var sortCol = ref('ticker');
             var sortDir = ref(1); // 1=asc, -1=desc
 
@@ -149,21 +152,31 @@
                 try {
                     var data = await API.getCompanies();
                     companies.value = Array.isArray(data) ? data : [];
-
-                    /* Fetch quotes in parallel */
-                    var promises = companies.value.map(function (c) {
-                        return API.getQuote(c.ticker).then(function (q) {
-                            quotes.value[c.ticker] = q;
-                        }).catch(function () {});
-                    });
-                    await Promise.allSettled(promises);
+                    await refreshQuotes();
                 } catch (err) {
                     companies.value = [];
                 }
                 loading.value = false;
             }
 
-            onMounted(fetchData);
+            async function refreshQuotes() {
+                var promises = companies.value.map(function (c) {
+                    return API.getQuote(c.ticker).then(function (q) {
+                        quotes.value[c.ticker] = q;
+                    }).catch(function () {});
+                });
+                await Promise.allSettled(promises);
+                lastUpdated.value = new Date();
+            }
+
+            onMounted(function () {
+                fetchData();
+                refreshTimer = setInterval(refreshQuotes, 30000);
+            });
+
+            onBeforeUnmount(function () {
+                if (refreshTimer) clearInterval(refreshTimer);
+            });
 
             return {
                 companies: companies,
@@ -181,6 +194,7 @@
                 fmtPrice: fmtPrice,
                 fmtChange: fmtChange,
                 changeClass: changeClass,
+                lastUpdated: lastUpdated,
                 goToStock: goToStock
             };
         },
@@ -201,6 +215,10 @@
         </div>
         <div class="mt-2 text-muted" style="font-size:0.8rem;">
             Всего компаний: {{ companies.length }} | Показано: {{ filteredCompanies.length }}
+            <span v-if="lastUpdated" class="ms-2">
+                <span class="mp-live-dot"></span>
+                {{ lastUpdated.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }}
+            </span>
         </div>
     </div>
 

@@ -4,10 +4,11 @@
 (function () {
     'use strict';
 
-    var ref       = Vue.ref;
-    var computed  = Vue.computed;
-    var watch     = Vue.watch;
-    var onMounted = Vue.onMounted;
+    var ref             = Vue.ref;
+    var computed        = Vue.computed;
+    var watch           = Vue.watch;
+    var onMounted       = Vue.onMounted;
+    var onBeforeUnmount = Vue.onBeforeUnmount;
 
     var SOURCE_LABELS = {
         telegram: 'Telegram',
@@ -60,8 +61,11 @@
             var showRelated     = ref(false);
             var categories      = ref([]);
 
+            var lastUpdated     = ref(null);
+
             // Debounce timer for text inputs
             var debounceTimer   = null;
+            var refreshTimer    = null;
 
             function toggleExpand(id) {
                 var copy = Object.assign({}, expandedIds.value);
@@ -140,10 +144,10 @@
                 }
             }
 
-            async function fetchNews(append) {
+            async function fetchNews(append, silent) {
                 if (append) {
                     loadingMore.value = true;
-                } else {
+                } else if (!silent) {
                     loading.value = true;
                 }
                 try {
@@ -167,6 +171,7 @@
                 }
                 loading.value = false;
                 loadingMore.value = false;
+                lastUpdated.value = new Date();
             }
 
             function resetAndFetch() {
@@ -205,6 +210,13 @@
             onMounted(function () {
                 fetchCategories();
                 fetchNews(false);
+                refreshTimer = setInterval(function () {
+                    if (offset.value === 0) fetchNews(false, true);
+                }, 30000);
+            });
+
+            onBeforeUnmount(function () {
+                if (refreshTimer) clearInterval(refreshTimer);
             });
 
             return {
@@ -232,6 +244,7 @@
                 loadMore: loadMore,
                 onFilterChange: onFilterChange,
                 onTextInput: onTextInput,
+                lastUpdated: lastUpdated,
                 clearFilters: clearFilters
             };
         },
@@ -239,7 +252,11 @@
 <div>
     <div class="mp-page-header">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <h1><i class="bi bi-newspaper me-2"></i>Новости</h1>
+            <h1 class="d-inline"><i class="bi bi-newspaper me-2"></i>Новости</h1>
+            <span v-if="lastUpdated" class="ms-3 text-muted" style="font-size:0.7rem;">
+                <span class="mp-live-dot"></span>
+                {{ lastUpdated.toLocaleTimeString('ru-RU', {hour:'2-digit',minute:'2-digit',second:'2-digit'}) }}
+            </span>
         </div>
 
         <!-- Filter bar -->
