@@ -13,6 +13,9 @@ import (
 
 // StartupConfig holds configuration for the startup pipeline.
 type StartupConfig struct {
+	// UniverseTickers: ALL tickers from DB — used for candle backfill (monitoring the whole market).
+	UniverseTickers  []string
+	// Tickers: subset used for backtesting. Either explicit from config or top-N from universe.
 	Tickers          []string
 	CandleDaysBack   int     // How many days of candle history to fetch.
 	TelegramMaxMsgs  int     // Max messages to read per channel from Telegram history.
@@ -22,11 +25,38 @@ type StartupConfig struct {
 }
 
 // DefaultStartupConfig returns sensible defaults for the startup pipeline.
-func DefaultStartupConfig(cfg *config.Config) StartupConfig {
-	tickers := cfg.Trading.Tickers
-	if len(tickers) == 0 {
-		tickers = []string{"SBER", "GAZP", "LKOH", "YNDX", "GMKN"}
+// It loads universe tickers from DB (all companies) and uses config for trading tickers.
+func DefaultStartupConfig(ctx context.Context, cfg *config.Config, db *postgres.DB) StartupConfig {
+	// Load full universe from DB.
+	companyRepo := postgres.NewCompanyRepo(db)
+	universeTickers, err := companyRepo.GetAllTickers(ctx)
+	if err != nil || len(universeTickers) == 0 {
+		// Fallback: use trading tickers or hardcoded defaults.
+		universeTickers = cfg.Trading.Tickers
+		if len(universeTickers) == 0 {
+			universeTickers = []string{"SBER", "GAZP", "LKOH", "YNDX", "GMKN"}
+		}
 	}
+
+	// Trading tickers: explicit override from config, or use top liquid tickers for backtests.
+	tradingTickers := cfg.Trading.Tickers
+	if len(tradingTickers) == 0 {
+		// Default: use the most liquid blue chips for backtesting.
+		tradingTickers = []string{
+			"SBER", "GAZP", "LKOH", "YNDX", "GMKN",
+			"NVTK", "ROSN", "VTBR", "PLZL", "MGNT",
+		}
+		maxPos := cfg.Trading.MaxPositions
+		if maxPos > 0 && maxPos < len(tradingTickers) {
+			tradingTickers = tradingTickers[:maxPos]
+		}
+	}
+
+	candleDays := cfg.Monitoring.CandleDaysBack
+	if candleDays <= 0 {
+		candleDays = 365
+	}
+
 	cash := cfg.Trading.InitialCash
 	if cash <= 0 {
 		cash = 50000
@@ -40,8 +70,9 @@ func DefaultStartupConfig(cfg *config.Config) StartupConfig {
 		tp = 0.06
 	}
 	return StartupConfig{
-		Tickers:         tickers,
-		CandleDaysBack:  365,
+		UniverseTickers: universeTickers,
+		Tickers:         tradingTickers,
+		CandleDaysBack:  candleDays,
 		TelegramMaxMsgs: 1500,
 		InitialCash:     cash,
 		StopLossPct:     sl,
@@ -89,15 +120,23 @@ func StartupPipeline(
 		return nil
 	}
 
-	// ---- Step 1: Backfill candles ----
-	log.Info("step 1/3: backfilling MOEX candles...")
+	// ---- Step 1: Backfill candles for FULL UNIVERSE ----
+	// This monitors the entire market (all companies in DB), not just trading tickers.
+	universeTickers := startupCfg.UniverseTickers
+	if len(universeTickers) == 0 {
+		universeTickers = startupCfg.Tickers // fallback
+	}
+	log.Info("step 1/3: backfilling MOEX candles for full universe...",
+		"universe_tickers", len(universeTickers),
+		"trading_tickers", len(startupCfg.Tickers),
+	)
 	candleBackfill := NewCandleBackfill(moexClient, candleRepo, log)
-	if err := candleBackfill.BackfillAll(ctx, startupCfg.Tickers, moex.Interval1Day, startupCfg.CandleDaysBack); err != nil {
+	if err := candleBackfill.BackfillAll(ctx, universeTickers, moex.Interval1Day, startupCfg.CandleDaysBack); err != nil {
 		log.Error("candle backfill failed", "error", err)
 		// Continue anyway — we might have partial data.
 	}
 
-	// Also fetch 1h candles for more granular analysis (last 90 days).
+	// Also fetch 1h candles for trading tickers (more granular, used for TA signals).
 	if err := candleBackfill.BackfillAll(ctx, startupCfg.Tickers, moex.Interval1Hour, 90); err != nil {
 		log.Warn("1h candle backfill failed", "error", err)
 	}

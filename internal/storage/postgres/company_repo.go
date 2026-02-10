@@ -45,6 +45,25 @@ func (r *CompanyRepo) GetAll(ctx context.Context) ([]domain.Company, error) {
 	return result, rows.Err()
 }
 
+// GetAllTickers returns all company ticker symbols from the database.
+func (r *CompanyRepo) GetAllTickers(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Pool.Query(ctx, `SELECT ticker FROM companies ORDER BY ticker`)
+	if err != nil {
+		return nil, fmt.Errorf("querying tickers: %w", err)
+	}
+	defer rows.Close()
+
+	var tickers []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, fmt.Errorf("scanning ticker: %w", err)
+		}
+		tickers = append(tickers, t)
+	}
+	return tickers, rows.Err()
+}
+
 // GetByTicker finds a company by its ticker symbol.
 func (r *CompanyRepo) GetByTicker(ctx context.Context, ticker string) (*domain.Company, error) {
 	var c domain.Company

@@ -10,18 +10,23 @@
     var watch     = Vue.watch;
 
     var SECTOR_LABELS = {
-        'OIL_GAS':     'Нефть и газ',
-        'BANKS':       'Банки',
-        'RETAIL':      'Ритейл',
-        'TELECOM':     'Телеком',
-        'METALS':      'Металлы',
-        'CHEMISTRY':   'Химия',
-        'ENERGY':      'Энергетика',
-        'IT':          'ИТ',
-        'REAL_ESTATE': 'Недвижимость',
-        'TRANSPORT':   'Транспорт',
-        'AGRICULTURE': 'Сельское хозяйство',
-        'FINANCE':     'Финансы'
+        'OIL_GAS':      'Нефть и газ',
+        'BANKS':        'Банки',
+        'RETAIL':       'Ритейл',
+        'TELECOM':      'Телеком',
+        'METALS':       'Металлы',
+        'CHEMISTRY':    'Химия',
+        'ENERGY':       'Энергетика',
+        'IT':           'ИТ',
+        'REAL_ESTATE':  'Недвижимость',
+        'TRANSPORT':    'Транспорт',
+        'AGRICULTURE':  'Сельское хозяйство',
+        'FINANCE':      'Финансы',
+        'CONSTRUCTION': 'Строительство',
+        'FOOD':         'Пищевая пром.',
+        'MINING':       'Добыча',
+        'PHARMA':       'Фармацевтика',
+        'INSURANCE':    'Страхование'
     };
 
     window.PageStocks = {
@@ -31,13 +36,26 @@
             var companies = ref([]);
             var quotes = ref({});
             var search = ref('');
+            var sectorFilter = ref('');
             var loading = ref(true);
             var sortCol = ref('ticker');
             var sortDir = ref(1); // 1=asc, -1=desc
 
+            var availableSectors = computed(function () {
+                var set = {};
+                companies.value.forEach(function (c) {
+                    if (c.sector) set[c.sector] = true;
+                });
+                return Object.keys(set).sort();
+            });
+
             var filteredCompanies = computed(function () {
                 var q = search.value.toLowerCase().trim();
+                var sector = sectorFilter.value;
                 var list = companies.value;
+                if (sector) {
+                    list = list.filter(function (c) { return c.sector === sector; });
+                }
                 if (q) {
                     list = list.filter(function (c) {
                         return c.ticker.toLowerCase().indexOf(q) >= 0 ||
@@ -150,8 +168,10 @@
             return {
                 companies: companies,
                 filteredCompanies: filteredCompanies,
+                availableSectors: availableSectors,
                 quotes: quotes,
                 search: search,
+                sectorFilter: sectorFilter,
                 loading: loading,
                 sortCol: sortCol,
                 sortDir: sortDir,
@@ -169,14 +189,18 @@
     <div class="mp-page-header">
         <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
             <h1><i class="bi bi-bar-chart-line me-2"></i>Акции</h1>
-            <div style="max-width:300px;width:100%;">
+            <div class="d-flex gap-2 align-items-center" style="max-width:500px;width:100%;">
+                <select class="form-select form-select-sm" style="max-width:170px;" v-model="sectorFilter">
+                    <option value="">Все секторы</option>
+                    <option v-for="s in availableSectors" :key="s" :value="s">{{ sectorLabel(s) }}</option>
+                </select>
                 <input type="text" class="form-control form-control-sm mp-search-input"
-                       placeholder="Поиск по тикеру или названию..."
+                       placeholder="Поиск..."
                        v-model="search">
             </div>
         </div>
         <div class="mt-2 text-muted" style="font-size:0.8rem;">
-            Всего компаний: {{ filteredCompanies.length }}
+            Всего компаний: {{ companies.length }} | Показано: {{ filteredCompanies.length }}
         </div>
     </div>
 

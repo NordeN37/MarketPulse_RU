@@ -16,6 +16,7 @@ import (
 	"github.com/NordeN37/MarketPulse_RU/internal/market/moex"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/postgres"
 	"github.com/NordeN37/MarketPulse_RU/internal/trading/engine"
+	"github.com/NordeN37/MarketPulse_RU/internal/trading/selector"
 )
 
 func main() {
@@ -35,12 +36,6 @@ func main() {
 		log = slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 
-	log.Info("starting MarketPulse trader",
-		"mode", cfg.Trading.Mode,
-		"tickers", cfg.Trading.Tickers,
-		"dry_run", cfg.Trading.DryRun,
-	)
-
 	// Graceful shutdown.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -53,17 +48,7 @@ func main() {
 		cancel()
 	}()
 
-	// MOEX client for quotes and candles.
-	moexClient := moex.NewClient(cfg.MOEX, log)
-
-	// Parse tickers.
-	tickers := cfg.Trading.Tickers
-	if len(tickers) == 0 {
-		log.Error("no tickers configured for trading")
-		os.Exit(1)
-	}
-
-	// Connect to PostgreSQL for backfill and persistence.
+	// Connect to PostgreSQL.
 	db, err := postgres.New(ctx, cfg.Database)
 	if err != nil {
 		log.Error("failed to connect to postgres", "error", err)
@@ -71,12 +56,43 @@ func main() {
 	}
 	defer db.Close()
 
+	// MOEX client for quotes and candles.
+	moexClient := moex.NewClient(cfg.MOEX, log)
+
+	// Build startup config — loads universe tickers from DB.
+	startupCfg := backfill.DefaultStartupConfig(ctx, cfg, db)
+	tickers := startupCfg.Tickers // trading tickers (subset of universe)
+
+	log.Info("starting MarketPulse trader",
+		"mode", cfg.Trading.Mode,
+		"universe_tickers", len(startupCfg.UniverseTickers),
+		"trading_tickers", tickers,
+		"dry_run", cfg.Trading.DryRun,
+	)
+
 	// ---- Startup Pipeline: backfill candles + read history + run backtests ----
 	if !*skipBacktest {
-		startupCfg := backfill.DefaultStartupConfig(cfg)
 		if err := backfill.StartupPipeline(ctx, cfg, startupCfg, db, moexClient, log); err != nil {
 			log.Error("startup pipeline failed", "error", err)
 			// Continue to live trading anyway.
+		}
+	}
+
+	// Dynamic portfolio selection: if no explicit tickers in config,
+	// rank the universe by signal strength and pick top-N.
+	if len(cfg.Trading.Tickers) == 0 {
+		maxPos := cfg.Trading.MaxPositions
+		if maxPos <= 0 {
+			maxPos = 10
+		}
+		sel := selector.NewSelector(moexClient, log)
+		dynamicTickers := sel.SelectTopN(ctx, startupCfg.UniverseTickers, maxPos, nil)
+		if len(dynamicTickers) > 0 {
+			tickers = dynamicTickers
+			log.Info("dynamic portfolio selected",
+				"count", len(tickers),
+				"tickers", strings.Join(tickers, ", "),
+			)
 		}
 	}
 

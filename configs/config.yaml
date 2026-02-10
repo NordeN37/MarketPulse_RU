@@ -130,24 +130,38 @@ moex:
   rate_limit_per_second: 5
 
 # =====================================================
+# Monitoring — full market universe
+# =====================================================
+# The system monitors ALL companies/commodities in the DB for:
+# news impacts, heat scores, candle data, sector analysis.
+# This is SEPARATE from trading (which uses a subset).
+monitoring:
+  # "all" = load every ticker from companies table (~50+)
+  # "custom" = only monitor the tickers listed below
+  universe: "all"
+  # custom_tickers:  # only used if universe=custom
+  #   - "SBER"
+  #   - "GAZP"
+  candle_days_back: 365  # 1 year of daily candles for the full universe
+
+# =====================================================
 # Trading System Configuration
 # =====================================================
+# Trading operates on a SUBSET of the monitored universe.
+# The system dynamically ranks tickers by signal strength
+# and trades the top-N (max_positions).
 trading:
-  # Mode: "news" (trade on news only), "ta" (technical analysis only), "combined" (both)
   mode: "combined"
 
-  # Tickers to trade (MOEX TQBR board)
-  tickers:
-    - "SBER"
-    - "GAZP"
-    - "LKOH"
-    - "GMKN"
-    - "ROSN"
-    - "NVTK"
-    - "YNDX"
-    - "MGNT"
-    - "PLZL"
-    - "TATN"
+  # Max active positions. Engine selects top-N from universe by signal strength.
+  max_positions: 10
+
+  # Explicit tickers override (optional).
+  # If set, ONLY these tickers are traded (no dynamic selection).
+  # If empty, dynamic selection from the full universe is used.
+  # tickers:
+  #   - "SBER"
+  #   - "GAZP"
 
   # How often to check signals (TA mode)
   check_interval: "5m"

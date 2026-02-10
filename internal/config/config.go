@@ -19,8 +19,9 @@ type Config struct {
 	Analyzer  AnalyzerConfig  `yaml:"analyzer"`
 	Alerts    AlertsConfig    `yaml:"alerts"`
 	API       APIConfig       `yaml:"api"`
-	MOEX      MOEXConfig      `yaml:"moex"`
-	Trading   TradingConfig   `yaml:"trading"`
+	MOEX       MOEXConfig       `yaml:"moex"`
+	Monitoring MonitoringConfig `yaml:"monitoring"`
+	Trading    TradingConfig    `yaml:"trading"`
 }
 
 type AppConfig struct {
@@ -195,11 +196,25 @@ func (m MOEXConfig) Timeout() time.Duration {
 	return d
 }
 
+// MonitoringConfig controls the full-market monitoring universe.
+type MonitoringConfig struct {
+	// "all" = load all tickers from companies table (default).
+	// "custom" = only monitor the tickers listed in CustomTickers.
+	Universe      string   `yaml:"universe"`
+	CustomTickers []string `yaml:"custom_tickers"`
+	// How many days of candle history to backfill for the full universe.
+	CandleDaysBack int `yaml:"candle_days_back"`
+}
+
 // TradingConfig holds trading system configuration.
 type TradingConfig struct {
 	// Mode: "news", "ta", "combined"
 	Mode          string   `yaml:"mode"`
+	// Tickers kept for backward compatibility / explicit portfolio override.
+	// If empty, the system dynamically selects top-N from the monitoring universe.
 	Tickers       []string `yaml:"tickers"`
+	// MaxPositions limits active trading positions (default 10).
+	MaxPositions  int      `yaml:"max_positions"`
 	CheckInterval string   `yaml:"check_interval"`
 	DryRun        bool     `yaml:"dry_run"`
 	InitialCash   float64  `yaml:"initial_cash"`

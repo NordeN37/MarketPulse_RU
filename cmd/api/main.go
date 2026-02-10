@@ -306,6 +306,36 @@ func main() {
 	})
 
 	// =====================================================
+	// Universe: full monitoring universe from DB
+	// =====================================================
+	mux.HandleFunc("GET /api/universe", func(w http.ResponseWriter, r *http.Request) {
+		companies, err := companyRepo.GetAll(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// Group by sector.
+		sectors := make(map[string][]domain.Company)
+		for _, c := range companies {
+			sectors[c.Sector] = append(sectors[c.Sector], c)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"total":     len(companies),
+			"companies": companies,
+			"sectors":   sectors,
+			"monitoring": map[string]any{
+				"universe":        cfg.Monitoring.Universe,
+				"candle_days_back": cfg.Monitoring.CandleDaysBack,
+			},
+			"trading": map[string]any{
+				"max_positions":    cfg.Trading.MaxPositions,
+				"explicit_tickers": cfg.Trading.Tickers,
+				"mode":             cfg.Trading.Mode,
+			},
+		})
+	})
+
+	// =====================================================
 	// Trading signals (from DB, populated by backtest/live)
 	// =====================================================
 	mux.HandleFunc("GET /api/signals", func(w http.ResponseWriter, r *http.Request) {
@@ -334,10 +364,15 @@ func main() {
 		if sigs == nil {
 			sigs = []domain.Signal{}
 		}
+		tradingTickers := cfg.Trading.Tickers
+		if len(tradingTickers) == 0 {
+			tradingTickers = []string{} // dynamic selection, no fixed tickers
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"signals": sigs,
-			"tickers": cfg.Trading.Tickers,
-			"mode":    cfg.Trading.Mode,
+			"signals":        sigs,
+			"tickers":        tradingTickers,
+			"max_positions":  cfg.Trading.MaxPositions,
+			"mode":           cfg.Trading.Mode,
 		})
 	})
 
@@ -345,32 +380,37 @@ func main() {
 	// Portfolios (returns config for 3 portfolio types)
 	// =====================================================
 	mux.HandleFunc("GET /api/portfolios", func(w http.ResponseWriter, r *http.Request) {
+		tradingTickers := cfg.Trading.Tickers
+		if len(tradingTickers) == 0 {
+			tradingTickers = []string{} // dynamic
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"portfolios": []map[string]any{
 				{
 					"type":         "news",
 					"name":         "Новостной",
 					"description":  "Торговля только по новостным сигналам",
-					"initial_cash": 50000,
-					"tickers":      cfg.Trading.Tickers,
+					"initial_cash": cfg.Trading.InitialCash,
+					"tickers":      tradingTickers,
 				},
 				{
 					"type":         "ta",
 					"name":         "Технический",
 					"description":  "Торговля только по техническому анализу",
-					"initial_cash": 50000,
-					"tickers":      cfg.Trading.Tickers,
+					"initial_cash": cfg.Trading.InitialCash,
+					"tickers":      tradingTickers,
 				},
 				{
 					"type":         "combined",
 					"name":         "Комбинированный",
 					"description":  "Совмещение новостей и технического анализа",
-					"initial_cash": 50000,
-					"tickers":      cfg.Trading.Tickers,
+					"initial_cash": cfg.Trading.InitialCash,
+					"tickers":      tradingTickers,
 				},
 			},
-			"risk":     cfg.Trading.Risk,
-			"strategy": cfg.Trading.Strategy,
+			"max_positions": cfg.Trading.MaxPositions,
+			"risk":          cfg.Trading.Risk,
+			"strategy":      cfg.Trading.Strategy,
 		})
 	})
 

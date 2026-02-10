@@ -169,6 +169,11 @@
         /** Trade history */
         getTrades: function (strategy, limit) {
             return request('/api/trades' + qs({ strategy: strategy, limit: limit }));
+        },
+
+        /** Universe info (all monitored companies + sector breakdown) */
+        getUniverse: function () {
+            return request('/api/universe');
         }
     };
 })();

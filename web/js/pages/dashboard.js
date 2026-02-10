@@ -114,8 +114,9 @@
             var alerts      = ref([]);
             var heatmap     = ref([]);
             var portfolios  = ref([]);
-            var quoteTickers = ref(['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN']);
+            var quoteTickers = ref([]);
             var quotes      = ref({});
+            var universeCount = ref(0);
 
             /* Widget visibility */
             var defaultVis = {};
@@ -219,16 +220,35 @@
                     }).catch(function () { portfolios.value = []; })
                 );
 
-                /* Quotes for each ticker */
-                quoteTickers.value.forEach(function (t) {
+                /* Load top companies for quick quotes (if not yet loaded) */
+                if (quoteTickers.value.length === 0) {
                     promises.push(
-                        API.getQuote(t).then(function (d) {
-                            quotes.value[t] = d;
-                        }).catch(function () {})
+                        API.getCompanies().then(function (companies) {
+                            if (!Array.isArray(companies)) return;
+                            universeCount.value = companies.length;
+                            /* Sort by market_cap desc, take top 10 for quotes */
+                            var sorted = companies.slice().sort(function (a, b) {
+                                return (b.market_cap || 0) - (a.market_cap || 0);
+                            });
+                            var top = sorted.slice(0, 10).map(function (c) { return c.ticker; });
+                            if (top.length === 0) top = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN'];
+                            quoteTickers.value = top;
+                        }).catch(function () {
+                            quoteTickers.value = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN'];
+                        })
                     );
-                });
+                }
 
                 await Promise.allSettled(promises);
+
+                /* Fetch quotes for loaded tickers */
+                var quotePromises = quoteTickers.value.map(function (t) {
+                    return API.getQuote(t).then(function (d) {
+                        quotes.value[t] = d;
+                    }).catch(function () {});
+                });
+
+                await Promise.allSettled(quotePromises);
                 loading.value = false;
             }
 
@@ -256,6 +276,7 @@
                 portfolios: portfolios,
                 quoteTickers: quoteTickers,
                 quotes: quotes,
+                universeCount: universeCount,
                 visibility: visibility,
                 collapsed: collapsed,
                 toggleWidget: toggleWidget,
@@ -316,6 +337,9 @@
                             </div>
                             <div class="mt-1" :class="changeClass(indexData.change)" style="font-size:0.9rem;">
                                 {{ indexData.change !== null ? fmtChange(indexData.change) : '' }}
+                            </div>
+                            <div class="mt-2 text-muted" style="font-size:0.7rem;" v-if="universeCount > 0">
+                                <i class="bi bi-globe me-1"></i>Мониторинг: {{ universeCount }} компаний
                             </div>
                         </div>
                     </div>
