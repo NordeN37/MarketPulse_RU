@@ -16,7 +16,6 @@ import (
 	"github.com/NordeN37/MarketPulse_RU/internal/market/moex"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/postgres"
 	"github.com/NordeN37/MarketPulse_RU/internal/trading/engine"
-	"github.com/NordeN37/MarketPulse_RU/internal/trading/selector"
 )
 
 func main() {
@@ -66,12 +65,17 @@ func main() {
 
 	// Build startup config — loads universe tickers from DB.
 	startupCfg := backfill.DefaultStartupConfig(ctx, cfg, db)
-	tickers := startupCfg.Tickers // trading tickers (subset of universe)
+
+	// Engine monitors the FULL universe. Risk manager limits open positions.
+	tickers := startupCfg.UniverseTickers
+	if len(cfg.Trading.Tickers) > 0 {
+		tickers = cfg.Trading.Tickers // explicit override from config
+	}
 
 	log.Info("starting MarketPulse trader",
 		"mode", cfg.Trading.Mode,
-		"universe_tickers", len(startupCfg.UniverseTickers),
-		"trading_tickers", tickers,
+		"monitored_tickers", len(tickers),
+		"max_positions", cfg.Trading.Risk.MaxOpenPositions,
 		"dry_run", cfg.Trading.DryRun,
 	)
 
@@ -80,24 +84,6 @@ func main() {
 		if err := backfill.StartupPipeline(ctx, cfg, startupCfg, db, moexClient, log); err != nil {
 			log.Error("startup pipeline failed", "error", err)
 			// Continue to live trading anyway.
-		}
-	}
-
-	// Dynamic portfolio selection: if no explicit tickers in config,
-	// rank the universe by signal strength and pick top-N.
-	if len(cfg.Trading.Tickers) == 0 {
-		maxPos := cfg.Trading.MaxPositions
-		if maxPos <= 0 {
-			maxPos = 10
-		}
-		sel := selector.NewSelector(moexClient, log)
-		dynamicTickers := sel.SelectTopN(ctx, startupCfg.UniverseTickers, maxPos, nil)
-		if len(dynamicTickers) > 0 {
-			tickers = dynamicTickers
-			log.Info("dynamic portfolio selected",
-				"count", len(tickers),
-				"tickers", strings.Join(tickers, ", "),
-			)
 		}
 	}
 
