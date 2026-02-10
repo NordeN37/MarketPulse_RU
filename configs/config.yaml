@@ -12,8 +12,8 @@ database:
   password: "marketpulse"
   name: "marketpulse"
   sslmode: "disable"
-  max_open_conns: 25
-  max_idle_conns: 5
+  max_open_conns: 10
+  max_idle_conns: 3
 
 redis:
   addr: "localhost:6379"
