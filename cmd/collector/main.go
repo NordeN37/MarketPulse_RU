@@ -11,6 +11,7 @@ import (
 
 	"github.com/NordeN37/MarketPulse_RU/internal/collector"
 	"github.com/NordeN37/MarketPulse_RU/internal/collector/rss"
+	"github.com/NordeN37/MarketPulse_RU/internal/collector/scraper"
 	"github.com/NordeN37/MarketPulse_RU/internal/collector/telegram"
 	"github.com/NordeN37/MarketPulse_RU/internal/config"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/postgres"
@@ -59,9 +60,10 @@ func main() {
 	}
 	defer cache.Close()
 
-	// Create pipeline
+	// Create pipeline with article scraper for fetching full article bodies.
 	newsRepo := postgres.NewNewsRepo(db)
-	pipeline := collector.NewPipeline(newsRepo, cache, log)
+	articleFetcher := scraper.NewArticleFetcher(log)
+	pipeline := collector.NewPipeline(newsRepo, cache, log).WithScraper(articleFetcher)
 
 	var wg sync.WaitGroup
 

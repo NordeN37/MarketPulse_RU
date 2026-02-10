@@ -51,6 +51,7 @@
             var pageSize     = 20;
             var offset       = ref(0);
             var searchQuery  = ref('');
+            var expandedIds  = ref({});
 
             var filteredNews = computed(function () {
                 var q = searchQuery.value.toLowerCase().trim();
@@ -60,6 +61,20 @@
                     return text.indexOf(q) >= 0;
                 });
             });
+
+            function toggleExpand(id) {
+                var copy = Object.assign({}, expandedIds.value);
+                if (copy[id]) {
+                    delete copy[id];
+                } else {
+                    copy[id] = true;
+                }
+                expandedIds.value = copy;
+            }
+
+            function isExpanded(id) {
+                return !!expandedIds.value[id];
+            }
 
             function fmtTime(ts) {
                 if (!ts) return '';
@@ -86,7 +101,6 @@
             }
 
             function sentimentClass(item) {
-                /* Try to detect sentiment from analysis if attached, otherwise neutral */
                 if (item.sentiment !== undefined) {
                     if (item.sentiment > 0.1) return 'mp-sentiment-dot--positive';
                     if (item.sentiment < -0.1) return 'mp-sentiment-dot--negative';
@@ -104,6 +118,10 @@
                 if (item.title) return item.title;
                 if (item.content) return item.content.substring(0, 80) + (item.content.length > 80 ? '...' : '');
                 return 'Без заголовка';
+            }
+
+            function hasLongContent(item) {
+                return item.content && item.content.length > 200;
             }
 
             async function fetchNews(append) {
@@ -143,12 +161,16 @@
                 loadingMore: loadingMore,
                 hasMore: hasMore,
                 searchQuery: searchQuery,
+                expandedIds: expandedIds,
+                toggleExpand: toggleExpand,
+                isExpanded: isExpanded,
                 fmtTime: fmtTime,
                 sourceLabel: sourceLabel,
                 categoryLabel: categoryLabel,
                 sentimentClass: sentimentClass,
                 getExcerpt: getExcerpt,
                 getTitle: getTitle,
+                hasLongContent: hasLongContent,
                 loadMore: loadMore
             };
         },
@@ -182,12 +204,20 @@
         </div>
 
         <div v-else>
-            <div v-for="item in filteredNews" :key="item.id" class="mp-news-card">
+            <div v-for="item in filteredNews" :key="item.id"
+                 class="mp-news-card"
+                 :class="{ 'mp-news-card--expanded': isExpanded(item.id) }"
+                 @click="toggleExpand(item.id)"
+                 style="cursor:pointer;">
                 <div class="d-flex align-items-start justify-content-between">
                     <div class="flex-grow-1">
                         <div class="mp-news-card__title">
                             <span class="mp-sentiment-dot" :class="sentimentClass(item)"></span>
                             {{ getTitle(item) }}
+                            <i v-if="hasLongContent(item)"
+                               class="bi ms-1"
+                               :class="isExpanded(item.id) ? 'bi-chevron-up' : 'bi-chevron-down'"
+                               style="font-size:0.75rem; color:var(--mp-text-muted);"></i>
                         </div>
                         <div class="mp-news-card__meta">
                             <span class="badge badge-news me-1" style="font-size:0.6rem;">{{ sourceLabel(item.source) }}</span>
@@ -195,8 +225,23 @@
                             <span v-if="item.source_channel" class="me-1">{{ item.source_channel }}</span>
                             <span>{{ fmtTime(item.published_at || item.collected_at) }}</span>
                         </div>
-                        <div class="mp-news-card__content" v-if="item.content">
+
+                        <!-- Collapsed: show excerpt -->
+                        <div class="mp-news-card__content" v-if="item.content && !isExpanded(item.id)">
                             {{ getExcerpt(item.content, 200) }}
+                        </div>
+
+                        <!-- Expanded: show full content -->
+                        <div class="mp-news-card__body" v-if="isExpanded(item.id) && item.content">
+                            <pre class="mp-news-card__fulltext">{{ item.content }}</pre>
+                        </div>
+
+                        <!-- Expanded: show link to original -->
+                        <div v-if="isExpanded(item.id) && item.url" class="mt-2">
+                            <a :href="item.url" target="_blank" rel="noopener" class="mp-news-card__link"
+                               @click.stop>
+                                <i class="bi bi-box-arrow-up-right me-1"></i>Открыть оригинал
+                            </a>
                         </div>
                     </div>
                 </div>
@@ -204,7 +249,7 @@
 
             <!-- Load more -->
             <div v-if="hasMore && !searchQuery" class="text-center mt-3">
-                <button class="btn btn-outline-primary" @click="loadMore" :disabled="loadingMore">
+                <button class="btn btn-outline-primary" @click.stop="loadMore" :disabled="loadingMore">
                     <span v-if="loadingMore">
                         <span class="spinner-border spinner-border-sm me-1"></span> Загрузка...
                     </span>

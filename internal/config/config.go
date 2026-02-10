@@ -230,7 +230,14 @@ type TradingStrategyConfig struct {
 }
 
 // Load reads and parses the configuration from a YAML file.
+// It automatically loads .env from the current directory (if it exists)
+// before expanding environment variables in the YAML.
 func Load(path string) (*Config, error) {
+	// Auto-load .env file (silently ignore if missing).
+	// Supports: VAR=value, export VAR=value, VAR="value"
+	// Existing env vars take precedence over .env values.
+	_ = loadEnvFile(".env")
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)

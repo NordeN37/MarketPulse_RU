@@ -440,6 +440,43 @@ html, body {
     line-height: 1.5;
 }
 
+.mp-news-card--expanded {
+    border-color: var(--mp-accent);
+    background-color: var(--mp-bg-tertiary);
+}
+
+.mp-news-card__body {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--mp-border-light);
+}
+
+.mp-news-card__fulltext {
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: var(--mp-text-primary);
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    background: transparent;
+    border: none;
+    padding: 0;
+    margin: 0;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.mp-news-card__link {
+    font-size: 0.8rem;
+    color: var(--mp-accent);
+    text-decoration: none;
+}
+
+.mp-news-card__link:hover {
+    color: var(--mp-accent-hover);
+    text-decoration: underline;
+}
+
 /* Sentiment dot */
 .mp-sentiment-dot {
     display: inline-block;

@@ -4,6 +4,7 @@ go 1.24.7
 
 require (
 	github.com/3bl3gamer/tgclient v0.220.1
+	github.com/PuerkitoBio/goquery v1.8.0
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/mmcdole/gofeed v1.3.0
@@ -12,7 +13,6 @@ require (
 )
 
 require (
-	github.com/PuerkitoBio/goquery v1.8.0 // indirect
 	github.com/andybalholm/cascadia v1.3.1 // indirect
 	github.com/ansel1/merry/v2 v2.2.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

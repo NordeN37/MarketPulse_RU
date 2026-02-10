@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 
+	"github.com/NordeN37/MarketPulse_RU/internal/collector/scraper"
 	"github.com/NordeN37/MarketPulse_RU/internal/domain"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/postgres"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/redis"
@@ -14,16 +15,24 @@ import (
 type Pipeline struct {
 	newsRepo *postgres.NewsRepo
 	cache    *redis.Client
+	scraper  *scraper.ArticleFetcher
 	log      *slog.Logger
 }
 
 // NewPipeline creates a new unified news processing pipeline.
+// If scraper is nil, article body fetching is disabled.
 func NewPipeline(newsRepo *postgres.NewsRepo, cache *redis.Client, log *slog.Logger) *Pipeline {
 	return &Pipeline{
 		newsRepo: newsRepo,
 		cache:    cache,
 		log:      log,
 	}
+}
+
+// WithScraper enables automatic article body fetching for news with URLs.
+func (p *Pipeline) WithScraper(s *scraper.ArticleFetcher) *Pipeline {
+	p.scraper = s
+	return p
 }
 
 // HandleNews is the main entry point for all news sources.
@@ -48,7 +57,20 @@ func (p *Pipeline) HandleNews(ctx context.Context, news *domain.News) error {
 		}
 	}
 
-	// 2. Store in PostgreSQL
+	// 2. Enrich: fetch full article body if URL present and content is short.
+	if p.scraper != nil && scraper.ShouldFetch(news.URL, news.Content) {
+		article := p.scraper.FetchArticle(ctx, news.URL)
+		if article != "" {
+			p.log.Debug("scraped full article body",
+				"url", news.URL,
+				"original_len", len(news.Content),
+				"scraped_len", len(article),
+			)
+			news.Content = article
+		}
+	}
+
+	// 3. Store in PostgreSQL
 	id, err := p.newsRepo.Insert(ctx, news)
 	if err != nil {
 		return err
@@ -68,7 +90,7 @@ func (p *Pipeline) HandleNews(ctx context.Context, news *domain.News) error {
 		"title", truncate(news.Title, 80),
 	)
 
-	// 3. Enqueue for LLM analysis (skip if cache is nil).
+	// 4. Enqueue for LLM analysis (skip if cache is nil).
 	if p.cache != nil {
 		if err := p.cache.EnqueueNews(ctx, id); err != nil {
 			p.log.Error("failed to enqueue news for analysis",
