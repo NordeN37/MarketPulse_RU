@@ -63,17 +63,17 @@ llm:
     timeout_seconds: 300
     thinking: false  # thinking off for batch classification speed
 
-  # Qwen-Plus API (DashScope) — heavy tasks + fallback when Ollama fails
-  # Best Russian language quality ($0.40/1M input, $1.20/1M output)
+  # Qwen3-Max (DashScope) — primary heavy model, FREE quota 1M tokens
+  # Strongest Qwen model, used first until free quota runs out
   qwen_plus:
-    name: "Qwen-Plus"
+    name: "Qwen3-Max"
     base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
     api_key: "${DASHSCOPE_API_KEY}"
-    model: "qwen-plus"
+    model: "qwen3-max"
     max_tokens: 4096
     timeout_seconds: 120
 
-  # DeepSeek API — backup if Qwen-Plus is down ($0.28/1M input, $0.42/1M output)
+  # DeepSeek API — last resort backup ($0.27/1M input, $1.10/1M output)
   deepseek:
     name: "DeepSeek"
     base_url: "https://api.deepseek.com"
@@ -87,20 +87,13 @@ llm:
     api_key: ""
     model: ""
 
-  # Extra providers — auto-fallback when primary model quota is exhausted.
-  # Each DashScope model has its own independent 1M token free quota.
-  # When qwen-plus runs out, router auto-switches to these.
+  # Fallback chain: qwen3-max (free) → qwen-plus (paid) → deepseek (backup)
+  # When qwen3-max free quota exhausted → qwen-plus picks up (disable Free Quota Only for it)
   extra_providers:
-    - name: "Qwen-Plus-Snapshot"
+    - name: "Qwen-Plus-Paid"
       base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
       api_key: "${DASHSCOPE_API_KEY}"
-      model: "qwen-plus-2025-07-28"
-      max_tokens: 4096
-      timeout_seconds: 120
-    - name: "Qwen3-Max"
-      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
-      api_key: "${DASHSCOPE_API_KEY}"
-      model: "qwen3-max"
+      model: "qwen-plus"
       max_tokens: 4096
       timeout_seconds: 120
 
