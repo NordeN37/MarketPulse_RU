@@ -23,19 +23,23 @@ redis:
 telegram:
   # MTProto userbot credentials (from https://my.telegram.org)
   # The userbot subscribes to public channels as a regular user
-  api_id: ${TELEGRAM_API_ID:-0}
+  api_id: ${TELEGRAM_API_ID}
   api_hash: "${TELEGRAM_API_HASH}"
   phone: "${TELEGRAM_PHONE}"
   # Channels to monitor (userbot joins them automatically)
   channels:
     - "@smartlabnews"
     - "@markettwits"
-    - "@moex_news"
-    - "@cbr_news"
-    - "@interfax_news"
+    - "@Bondholders"
+    - "@ifax_go"
+    - "@interfaxonline"
     - "@rbc_news"
     - "@vedomosti"
-    - "@forbes_russia"
+    - "@forbesrussia"
+    - "@harmfulinvestor"
+    - "@tass_agency"
+    - "@kommersant"
+    - "@prime1"
   # Bot token for SENDING alerts (separate from userbot)
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   alert_chat_id: ${TELEGRAM_ALERT_CHAT_ID:-0}
