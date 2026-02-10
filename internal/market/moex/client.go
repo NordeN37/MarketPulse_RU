@@ -17,6 +17,7 @@ type Client struct {
 	baseURL    string
 	httpClient *http.Client
 	log        *slog.Logger
+	authCookie string // raw Cookie header value from MOEX Passport auth
 }
 
 // NewClient creates a new MOEX ISS API client.
@@ -234,6 +235,11 @@ func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
+	// Inject MOEX Passport auth cookie if available
+	if c.authCookie != "" {
+		req.Header.Set("Cookie", c.authCookie)
+	}
+
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("MOEX request: %w", err)
@@ -244,7 +250,21 @@ func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
 		return nil, fmt.Errorf("MOEX returned status %d", resp.StatusCode)
 	}
 
-	return io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading MOEX response: %w", err)
+	}
+
+	// Detect HTML responses (auth redirect or error pages)
+	if len(data) > 0 && data[0] == '<' {
+		snippet := string(data)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		return nil, fmt.Errorf("MOEX returned HTML instead of JSON (auth required?): %s...", snippet)
+	}
+
+	return data, nil
 }
 
 func makeColumnIndex(columns []string) map[string]int {

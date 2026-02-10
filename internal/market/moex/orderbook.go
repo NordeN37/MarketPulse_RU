@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"net/http/cookiejar"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -41,21 +41,21 @@ type OrderBookAnomaly struct {
 	DetectedAt time.Time `json:"detected_at"`
 }
 
-// Authenticate logs in to MOEX Passport and returns an authenticated HTTP client.
+// Authenticate logs in to MOEX Passport and stores auth cookies.
 // Required for order book access.
+// Extracts raw Set-Cookie values and injects them manually on every ISS request,
+// bypassing Go's cookie jar domain matching (passport.moex.com ≠ iss.moex.com).
 func (c *Client) Authenticate(ctx context.Context, login, password string) error {
 	if login == "" || password == "" {
 		return fmt.Errorf("MOEX passport credentials not configured")
 	}
 
-	jar, err := cookiejar.New(nil)
-	if err != nil {
-		return fmt.Errorf("creating cookie jar: %w", err)
-	}
-
 	authClient := &http.Client{
-		Timeout: 10 * time.Second,
-		Jar:     jar,
+		Timeout: 15 * time.Second,
+		// Don't follow redirects — we need the raw Set-Cookie headers
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
@@ -71,25 +71,43 @@ func (c *Client) Authenticate(ctx context.Context, login, password string) error
 	}
 	resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	// 200 = success, 302 = redirect with cookies (also ok)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusFound {
 		return fmt.Errorf("MOEX auth failed: status %d", resp.StatusCode)
 	}
 
-	// Transfer cookies to main HTTP client
-	c.httpClient.Jar = jar
-	c.log.Info("MOEX passport authenticated", "login", login)
+	// Extract all Set-Cookie headers and build a raw Cookie string.
+	// This bypasses Go's strict cookie domain matching —
+	// passport.moex.com cookies will be sent to iss.moex.com.
+	var parts []string
+	for _, setCookie := range resp.Header["Set-Cookie"] {
+		c.log.Info("MOEX auth cookie", "raw", setCookie)
+		// Parse "name=value; Path=...; Domain=..." — extract "name=value" part
+		nameVal := strings.SplitN(setCookie, ";", 2)[0]
+		nameVal = strings.TrimSpace(nameVal)
+		if nameVal != "" && !strings.HasPrefix(nameVal, "=") {
+			parts = append(parts, nameVal)
+		}
+	}
+
+	if len(parts) == 0 {
+		return fmt.Errorf("MOEX auth: no cookies received (wrong credentials?)")
+	}
+
+	c.authCookie = strings.Join(parts, "; ")
+	c.log.Info("MOEX passport authenticated", "login", login, "cookie_count", len(parts))
 	return nil
 }
 
 // GetOrderBook fetches the order book (стакан) for a specific ticker.
 // Requires prior authentication via Authenticate().
 func (c *Client) GetOrderBook(ctx context.Context, ticker string) (*OrderBook, error) {
-	url := fmt.Sprintf("%s/engines/stock/markets/shares/boards/TQBR/securities/%s/orderbook.json?iss.meta=off",
+	reqURL := fmt.Sprintf("%s/engines/stock/markets/shares/boards/TQBR/securities/%s/orderbook.json?iss.meta=off",
 		c.baseURL, ticker)
 
-	data, err := c.doRequest(ctx, url)
+	data, err := c.doRequest(ctx, reqURL)
 	if err != nil {
-		return nil, fmt.Errorf("fetching order book for %s: %w", ticker, err)
+		return nil, fmt.Errorf("order book %s: %w", ticker, err)
 	}
 
 	var resp struct {
@@ -99,11 +117,20 @@ func (c *Client) GetOrderBook(ctx context.Context, ticker string) (*OrderBook, e
 		} `json:"orderbook"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, fmt.Errorf("parsing order book response: %w", err)
+		// Show start of response for debugging
+		snippet := string(data)
+		if len(snippet) > 100 {
+			snippet = snippet[:100]
+		}
+		return nil, fmt.Errorf("parsing order book for %s: %w (response: %s)", ticker, err, snippet)
 	}
 
 	if len(resp.Orderbook.Data) == 0 {
-		return nil, fmt.Errorf("empty order book for %s (auth required?)", ticker)
+		// Return empty order book instead of error (possible outside trading hours)
+		return &OrderBook{
+			SecID:     ticker,
+			UpdatedAt: time.Now(),
+		}, nil
 	}
 
 	colIdx := makeColumnIndex(resp.Orderbook.Columns)
