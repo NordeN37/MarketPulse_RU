@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/NordeN37/MarketPulse_RU/internal/config"
 	"github.com/NordeN37/MarketPulse_RU/internal/llm/claude"
@@ -67,6 +68,8 @@ type Router struct {
 	log            *slog.Logger
 	// forceHeavy overrides routing — all tasks go through heavy chain (skip Ollama)
 	forceHeavy bool
+	// rrCounter round-robin counter for distributing across providers in batch mode
+	rrCounter atomic.Uint64
 }
 
 // NewRouter creates a new multi-provider LLM task router.
@@ -144,7 +147,7 @@ func (r *Router) SetForceHeavy(force bool) {
 // Generate routes the task to the appropriate LLM and returns (response, model_name, error).
 func (r *Router) Generate(ctx context.Context, taskType TaskType, system, prompt string) (string, string, error) {
 	if r.forceHeavy {
-		return r.generateHeavy(ctx, taskType, system, prompt)
+		return r.generateRoundRobin(ctx, taskType, system, prompt)
 	}
 	switch taskType {
 	case TaskDeepAnalysis, TaskDigest, TaskChainAnalysis:
@@ -152,6 +155,39 @@ func (r *Router) Generate(ctx context.Context, taskType TaskType, system, prompt
 	default:
 		return r.generateFast(ctx, taskType, system, prompt)
 	}
+}
+
+// generateRoundRobin distributes requests across all heavy providers evenly.
+// If the chosen provider fails, falls back to others.
+func (r *Router) generateRoundRobin(ctx context.Context, taskType TaskType, system, prompt string) (string, string, error) {
+	n := len(r.heavyProviders)
+	if n == 0 {
+		return "", "", fmt.Errorf("no API providers available for batch mode")
+	}
+
+	idx := int(r.rrCounter.Add(1)-1) % n
+	var lastErr error
+
+	// Try starting from the round-robin pick, then rotate through others
+	for i := 0; i < n; i++ {
+		p := r.heavyProviders[(idx+i)%n]
+		if !p.IsAvailable() {
+			continue
+		}
+		resp, err := p.Generate(ctx, system, prompt)
+		if err != nil {
+			r.log.Warn("provider failed, trying next",
+				"model", p.ModelName(),
+				"task", taskType,
+				"error", err,
+			)
+			lastErr = err
+			continue
+		}
+		return resp, p.ModelName(), nil
+	}
+
+	return "", "", fmt.Errorf("all providers failed: %w", lastErr)
 }
 
 // generateFast uses the local Ollama fast model for routine tasks.
