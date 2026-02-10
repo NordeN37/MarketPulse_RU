@@ -53,16 +53,13 @@ llm:
     timeout_seconds: 120
     thinking: false  # disable thinking for fast JSON extraction
 
-  # Heavy model for complex tasks (deep analysis, digests) — CPU-only
-  # Qwen3-14B ≈ Qwen2.5-32B quality, ~10GB RAM
+  # ollama_heavy disabled — one local model is enough, heavy tasks go to Qwen-Plus API
   ollama_heavy:
-    base_url: "http://localhost:11434"
-    model: "qwen3:14b"
-    timeout_seconds: 300  # CPU inference is slow, allow 5 min
-    thinking: true   # enable thinking for deeper reasoning
+    base_url: ""
+    model: ""
 
-  # Qwen-Plus API (DashScope) — best Russian language quality ($0.40/1M input, $1.20/1M output)
-  # OpenAI-compatible, 119 languages, thinking mode support
+  # Qwen-Plus API (DashScope) — heavy tasks + fallback when Ollama fails
+  # Best Russian language quality ($0.40/1M input, $1.20/1M output)
   qwen_plus:
     name: "Qwen-Plus"
     base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
@@ -71,8 +68,7 @@ llm:
     max_tokens: 4096
     timeout_seconds: 120
 
-  # DeepSeek API — cheapest external provider ($0.28/1M input, $0.42/1M output)
-  # OpenAI-compatible API, automatic prefix caching
+  # DeepSeek API — backup if Qwen-Plus is down ($0.28/1M input, $0.42/1M output)
   deepseek:
     name: "DeepSeek"
     base_url: "https://api.deepseek.com"
@@ -81,20 +77,10 @@ llm:
     max_tokens: 4096
     timeout_seconds: 120
 
-  # Claude API — highest quality, most expensive (use sparingly)
+  # Claude API disabled
   claude:
-    api_key: "${CLAUDE_API_KEY}"
-    model: "claude-sonnet-4-20250514"
-    max_tokens: 4096
-
-  # Additional OpenAI-compatible providers (OpenRouter, local vLLM, etc.)
-  # extra_providers:
-  #   - name: "OpenRouter"
-  #     base_url: "https://openrouter.ai/api"
-  #     api_key: "${OPENROUTER_API_KEY}"
-  #     model: "meta-llama/llama-3.1-70b-instruct"
-  #     max_tokens: 4096
-  #     timeout_seconds: 120
+    api_key: ""
+    model: ""
 
 collector:
   # How often to poll RSS feeds (Telegram is push-based)
