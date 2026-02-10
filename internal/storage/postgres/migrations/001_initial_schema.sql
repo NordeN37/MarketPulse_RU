@@ -61,8 +61,8 @@ CREATE TABLE IF NOT EXISTS companies (
     updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_companies_sector ON companies(sector);
-CREATE INDEX idx_companies_country ON companies(country);
+CREATE INDEX IF NOT EXISTS idx_companies_sector ON companies(sector);
+CREATE INDEX IF NOT EXISTS idx_companies_country ON companies(country);
 
 CREATE TABLE IF NOT EXISTS bonds (
     id            BIGSERIAL PRIMARY KEY,
@@ -84,8 +84,8 @@ CREATE TABLE IF NOT EXISTS bonds (
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX idx_bonds_issuer ON bonds(issuer_id);
-CREATE INDEX idx_bonds_maturity ON bonds(maturity);
+CREATE INDEX IF NOT EXISTS idx_bonds_issuer ON bonds(issuer_id);
+CREATE INDEX IF NOT EXISTS idx_bonds_maturity ON bonds(maturity);
 
 CREATE TABLE IF NOT EXISTS commodities (
     id        BIGSERIAL PRIMARY KEY,
@@ -130,9 +130,9 @@ CREATE TABLE IF NOT EXISTS news (
     UNIQUE(source, external_id)
 );
 
-CREATE INDEX idx_news_published ON news(published_at DESC);
-CREATE INDEX idx_news_source ON news(source, source_channel);
-CREATE INDEX idx_news_collected ON news(collected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_published ON news(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_source ON news(source, source_channel);
+CREATE INDEX IF NOT EXISTS idx_news_collected ON news(collected_at DESC);
 
 CREATE TABLE IF NOT EXISTS news_analysis (
     id                BIGSERIAL PRIMARY KEY,
@@ -148,8 +148,8 @@ CREATE TABLE IF NOT EXISTS news_analysis (
     UNIQUE(news_id)
 );
 
-CREATE INDEX idx_news_analysis_category ON news_analysis(category);
-CREATE INDEX idx_news_analysis_urgency ON news_analysis(urgency DESC);
+CREATE INDEX IF NOT EXISTS idx_news_analysis_category ON news_analysis(category);
+CREATE INDEX IF NOT EXISTS idx_news_analysis_urgency ON news_analysis(urgency DESC);
 
 CREATE TABLE IF NOT EXISTS news_impacts (
     id               BIGSERIAL PRIMARY KEY,
@@ -163,8 +163,8 @@ CREATE TABLE IF NOT EXISTS news_impacts (
     reasoning        TEXT DEFAULT ''
 );
 
-CREATE INDEX idx_news_impacts_entity ON news_impacts(entity_type, entity_id);
-CREATE INDEX idx_news_impacts_news ON news_impacts(news_id);
+CREATE INDEX IF NOT EXISTS idx_news_impacts_entity ON news_impacts(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_news_impacts_news ON news_impacts(news_id);
 
 -- ============================================================
 -- Aggregation tables
@@ -185,8 +185,8 @@ CREATE TABLE IF NOT EXISTS heat_scores (
     UNIQUE(entity_type, entity_id, date, timeframe)
 );
 
-CREATE INDEX idx_heat_scores_entity ON heat_scores(entity_type, entity_id, date DESC);
-CREATE INDEX idx_heat_scores_date ON heat_scores(date DESC);
+CREATE INDEX IF NOT EXISTS idx_heat_scores_entity ON heat_scores(entity_type, entity_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_heat_scores_date ON heat_scores(date DESC);
 
 -- ============================================================
 -- Alert tables
@@ -206,9 +206,9 @@ CREATE TABLE IF NOT EXISTS alerts (
     sent_at         TIMESTAMPTZ
 );
 
-CREATE INDEX idx_alerts_severity ON alerts(severity, created_at DESC);
-CREATE INDEX idx_alerts_entity ON alerts(entity_type, entity_id);
-CREATE INDEX idx_alerts_unsent ON alerts(sent_to_telegram) WHERE sent_to_telegram = FALSE;
+CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_alerts_entity ON alerts(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_unsent ON alerts(sent_to_telegram) WHERE sent_to_telegram = FALSE;
 
 -- ============================================================
 -- User tables
