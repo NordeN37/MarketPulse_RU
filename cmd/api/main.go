@@ -665,6 +665,29 @@ func main() {
 		}
 	})
 
+	// LLM usage stats (read from Redis, written by analyzer)
+	mux.HandleFunc("GET /api/admin/llm-stats", func(w http.ResponseWriter, r *http.Request) {
+		data, err := cache.ReadLLMStats(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read LLM stats")
+			return
+		}
+		if data == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"updated_at":     nil,
+				"mode":           "unknown",
+				"total_requests": 0,
+				"total_errors":   0,
+				"total_tokens":   0,
+				"total_cost_usd": 0,
+				"models":         []any{},
+			})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(data)
+	})
+
 	// =====================================================
 	// Static files — serve Vue.js SPA from web/
 	// =====================================================

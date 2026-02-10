@@ -73,6 +73,7 @@ func main() {
 
 	if *batch {
 		router.SetForceHeavy(true)
+		router.Stats.SetMode("batch")
 		log.Info("BATCH MODE: all tasks routed to API providers (Qwen-Plus → DeepSeek)")
 	}
 
@@ -106,9 +107,9 @@ func main() {
 	var stats analyzerStats
 	stats.startedAt = time.Now()
 
-	// Periodic stats reporter
+	// Periodic stats reporter + Redis stats writer
 	go func() {
-		ticker := time.NewTicker(60 * time.Second)
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -120,14 +121,20 @@ func main() {
 				total := ok + fail
 				if total == 0 {
 					log.Info("analyzer: ожидание новостей в очереди...")
-					continue
+				} else {
+					elapsed := time.Since(stats.startedAt).Seconds()
+					log.Info("analyzer: статистика",
+						"обработано", ok,
+						"ошибок", fail,
+						"скорость", fmt.Sprintf("%.1f/мин", float64(total)/elapsed*60),
+					)
 				}
-				elapsed := time.Since(stats.startedAt).Seconds()
-				log.Info("analyzer: статистика",
-					"обработано", ok,
-					"ошибок", fail,
-					"скорость", fmt.Sprintf("%.1f/мин", float64(total)/elapsed*60),
-				)
+				// Write LLM stats to Redis for the admin UI
+				if data, err := router.Stats.ToJSON(); err == nil {
+					if wErr := cache.WriteLLMStats(ctx, data); wErr != nil {
+						log.Debug("failed to write LLM stats to Redis", "error", wErr)
+					}
+				}
 			}
 		}
 	}()

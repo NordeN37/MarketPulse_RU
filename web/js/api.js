@@ -189,6 +189,11 @@
         /** Admin: trigger re-read for a specific source */
         triggerReread: function (sourceType, channel) {
             return postJSON('/api/admin/reread', { type: sourceType, channel: channel });
+        },
+
+        /** Admin: get LLM usage stats */
+        getLLMStats: function () {
+            return request('/api/admin/llm-stats');
         }
     };
 

@@ -133,6 +133,20 @@ func (c *Client) QueueLen(ctx context.Context) (int64, error) {
 	return c.rdb.LLen(ctx, "queue:news:analyze").Result()
 }
 
+// WriteLLMStats stores LLM usage stats (written by analyzer, read by API).
+func (c *Client) WriteLLMStats(ctx context.Context, statsJSON []byte) error {
+	return c.rdb.Set(ctx, "llm:stats", statsJSON, 5*time.Minute).Err()
+}
+
+// ReadLLMStats reads LLM usage stats (written by analyzer).
+func (c *Client) ReadLLMStats(ctx context.Context) ([]byte, error) {
+	data, err := c.rdb.Get(ctx, "llm:stats").Bytes()
+	if err == redis.Nil {
+		return nil, nil
+	}
+	return data, err
+}
+
 // PublishReread sends a reread command to the collector for a specific source/channel.
 func (c *Client) PublishReread(ctx context.Context, sourceType, channel string) error {
 	payload := sourceType + ":" + channel

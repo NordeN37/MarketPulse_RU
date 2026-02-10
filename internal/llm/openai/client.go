@@ -25,6 +25,10 @@ type Client struct {
 	maxTokens  int
 	httpClient *http.Client
 	disabled   atomic.Bool // set to true when quota is exhausted
+
+	// Last response usage (updated after each successful call)
+	lastPromptTokens     atomic.Int64
+	lastCompletionTokens atomic.Int64
 }
 
 // Config holds settings for an OpenAI-compatible provider.
@@ -181,6 +185,10 @@ func (c *Client) Generate(ctx context.Context, system, prompt string) (string, e
 			return "", fmt.Errorf("empty response from provider")
 		}
 
+		// Track usage for stats
+		c.lastPromptTokens.Store(int64(chatResp.Usage.PromptTokens))
+		c.lastCompletionTokens.Store(int64(chatResp.Usage.CompletionTokens))
+
 		return chatResp.Choices[0].Message.Content, nil
 	}
 
@@ -195,4 +203,9 @@ func (c *Client) IsAvailable() bool {
 // ModelName returns the configured model name.
 func (c *Client) ModelName() string {
 	return c.model
+}
+
+// LastUsage returns token counts from the most recent successful call.
+func (c *Client) LastUsage() (promptTokens, completionTokens int) {
+	return int(c.lastPromptTokens.Load()), int(c.lastCompletionTokens.Load())
 }

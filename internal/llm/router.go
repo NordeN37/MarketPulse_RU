@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/NordeN37/MarketPulse_RU/internal/config"
 	"github.com/NordeN37/MarketPulse_RU/internal/llm/claude"
@@ -67,8 +68,9 @@ type Router struct {
 	heavyProviders []Provider
 	// API-only providers for batch mode (no local Ollama — it's too slow on CPU)
 	apiProviders []Provider
-	cfg          config.LLMConfig
-	log          *slog.Logger
+	cfg   config.LLMConfig
+	log   *slog.Logger
+	Stats *StatsCollector
 	// forceHeavy overrides routing — all tasks go through heavy chain (skip Ollama)
 	forceHeavy bool
 	// rrCounter round-robin counter for distributing across providers in batch mode
@@ -81,6 +83,7 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 		ollamaFast: ollama.NewClient(cfg.Ollama),
 		cfg:        cfg,
 		log:        log,
+		Stats:      NewStatsCollector(),
 	}
 
 	// Setup heavy Ollama model if configured separately
@@ -199,7 +202,10 @@ func (r *Router) generateRoundRobin(ctx context.Context, taskType TaskType, syst
 		if !p.IsAvailable() {
 			continue
 		}
+		start := time.Now()
 		resp, err := p.Generate(ctx, system, prompt)
+		latency := time.Since(start)
+		r.recordProviderStats(p, "api", err, latency)
 		if err != nil {
 			if errors.Is(err, openai.ErrQuotaExhausted) {
 				r.log.Error("КВОТА ИСЧЕРПАНА — провайдер отключён",
@@ -236,8 +242,11 @@ func (r *Router) countAvailable(providers []Provider) int {
 // generateFast uses the local Ollama fast model for routine tasks.
 func (r *Router) generateFast(ctx context.Context, taskType TaskType, system, prompt string) (string, string, error) {
 	r.log.Debug("routing to Ollama (fast)", "task", taskType, "model", r.ollamaFast.ModelName())
+	start := time.Now()
 	resp, err := r.ollamaFast.Generate(ctx, system, prompt)
+	latency := time.Since(start)
 	if err != nil {
+		r.Stats.RecordError(r.ollamaFast.ModelName(), "ollama", latency)
 		// Try heavy providers as fallback
 		r.log.Warn("Ollama fast failed, trying heavy providers",
 			"task", taskType,
@@ -245,6 +254,7 @@ func (r *Router) generateFast(ctx context.Context, taskType TaskType, system, pr
 		)
 		return r.tryHeavyProviders(ctx, taskType, system, prompt)
 	}
+	r.Stats.RecordSuccess(r.ollamaFast.ModelName(), "ollama", 0, 0, latency)
 	return resp, r.ollamaFast.ModelName(), nil
 }
 
@@ -271,7 +281,10 @@ func (r *Router) tryHeavyProviders(ctx context.Context, taskType TaskType, syste
 		}
 
 		r.log.Debug("trying provider", "model", provider.ModelName(), "task", taskType)
+		start := time.Now()
 		resp, err := provider.Generate(ctx, system, prompt)
+		latency := time.Since(start)
+		r.recordProviderStats(provider, "api", err, latency)
 		if err != nil {
 			if errors.Is(err, openai.ErrQuotaExhausted) {
 				r.log.Error("КВОТА ИСЧЕРПАНА — провайдер отключён",
@@ -306,6 +319,28 @@ func (r *Router) tryHeavyProviders(ctx context.Context, taskType TaskType, syste
 // OllamaAvailable checks if the local Ollama instance is reachable.
 func (r *Router) OllamaAvailable(ctx context.Context) bool {
 	return r.ollamaFast.IsAvailable(ctx)
+}
+
+// usageProvider is optionally implemented by providers that track token usage.
+type usageProvider interface {
+	LastUsage() (promptTokens, completionTokens int)
+}
+
+// recordProviderStats records stats for a provider call.
+func (r *Router) recordProviderStats(p Provider, providerType string, err error, latency time.Duration) {
+	model := p.ModelName()
+	if err != nil {
+		r.Stats.RecordError(model, providerType, latency)
+		if errors.Is(err, openai.ErrQuotaExhausted) {
+			r.Stats.MarkDisabled(model)
+		}
+		return
+	}
+	var prompt, completion int
+	if up, ok := p.(usageProvider); ok {
+		prompt, completion = up.LastUsage()
+	}
+	r.Stats.RecordSuccess(model, providerType, prompt, completion, latency)
 }
 
 // AvailableProviders returns a list of available provider names.
