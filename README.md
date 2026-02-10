@@ -1,6 +1,6 @@
 # MarketPulse_RU
 
-Аналитическая платформа для российского финансового рынка. Собирает новости из Telegram-каналов и RSS, анализирует через LLM, генерирует торговые сигналы и управляет портфелями.
+Аналитическая платформа для российского финансового рынка с автоматической торговлей через Т-Инвестиции. Собирает новости из Telegram-каналов и RSS, анализирует через LLM, генерирует торговые сигналы, исполняет ордера через T-Invest API.
 
 ## Архитектура
 
@@ -33,9 +33,10 @@
                                         │
 ┌──────────────────────────┐            │
 │      API + WEB UI        │◀───────────┘
-│  REST API + Vue.js SPA   │
-│  SSE real-time quotes    │
-│  TradingView charts      │
+│  REST API + Vue.js SPA   │     ┌──────────────┐
+│  SSE real-time quotes    │────▶│  T-Invest    │
+│  TradingView charts      │     │  (gRPC API)  │
+│  T-Invest admin panel    │     └──────────────┘
 └──────────────────────────┘
 ```
 
@@ -198,6 +199,31 @@ export DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 | Max drawdown (circuit breaker) | 10% |
 | Max открытых позиций | 10 |
 
+## Т-Инвестиции (T-Invest API)
+
+Интеграция с брокером Т-Инвестиции через официальный gRPC SDK (`invest-api-go-sdk v1.40.1`).
+
+### Возможности
+
+- **Динамическое подключение**: токен вводится через Web UI, хранится в Redis
+- **Мульти-аккаунт**: привязка стратегий (news/ta/combined) к разным счетам
+- **Реальная торговля**: исполнение сигналов через рыночные ордера
+- **gRPC streaming**: real-time цены через подписку → SSE на фронт
+- **Портфель брокера**: периодическая синхронизация (30с) → кэш в Redis
+- **Маржинальность**: проверка доступных средств перед выставлением ордера
+- **SL/TP по live-ценам**: проверка стоп-лосс/тейк-профит через T-Invest API
+- **Вывод прибыли**: настраиваемый % от чистой прибыли, по расписанию
+
+### Настройка
+
+1. Получить токен на [T-Invest](https://www.tbank.ru/invest/)
+2. Открыть Web UI → страница **Т-Инвест**
+3. Ввести токен, выбрать режим (production/sandbox)
+4. Назначить стратегии на счета
+5. Стриминг цен запускается автоматически
+
+> Токен хранится только в Redis, не в конфиг-файлах. При перезапуске API сервер автоматически восстанавливает подключение из Redis.
+
 ## Web UI
 
 Dashboard: `http://localhost:8080` после `make run-api`.
@@ -207,10 +233,12 @@ Dashboard: `http://localhost:8080` после `make run-api`.
 - **Новости**: лента с LLM-анализом, авто-обновление 30с
 - **Портфели**: 3 портфеля с бэктестированием
 - **Настройки**: Telegram авторизация, управление источниками (re-read RSS/TG каналов)
+- **Т-Инвестиции**: подключение токена, счета, стратегии, портфель брокера, ордера, инструменты, вывод прибыли
 
 ### Real-time обновления
 
-- **Котировки**: SSE (Server-Sent Events) через `/api/stream/quotes`, обновление каждые 10с
+- **Котировки MOEX**: SSE через `/api/stream/quotes`, обновление каждые 10с
+- **Котировки T-Invest**: gRPC streaming → SSE через `/api/stream/tinvest`, real-time цены
 - **Новости**: авто-обновление каждые 30с на первой странице
 - Единый `QuoteStream` на фронте — один SSE на все страницы
 
@@ -246,6 +274,30 @@ Dashboard: `http://localhost:8080` после `make run-api`.
 | GET | `/api/admin/telegram-status` | Статус Telegram авторизации |
 | POST | `/api/admin/telegram-code` | Отправить код авторизации |
 | POST | `/api/admin/telegram-password` | Отправить пароль 2FA |
+| | | |
+| | **T-Invest** | |
+| GET | `/api/admin/tinvest/status` | Статус подключения + стратегии |
+| POST | `/api/admin/tinvest/connect` | Подключить токен |
+| POST | `/api/admin/tinvest/disconnect` | Отключить |
+| GET | `/api/admin/tinvest/accounts` | Список счетов |
+| GET | `/api/admin/tinvest/strategies` | Привязки стратегий |
+| POST | `/api/admin/tinvest/strategies` | Сохранить привязки |
+| POST | `/api/admin/tinvest/stream/start` | Запустить gRPC стриминг |
+| POST | `/api/admin/tinvest/stream/stop` | Остановить стриминг |
+| GET | `/api/admin/tinvest/withdrawal` | Конфиг вывода прибыли |
+| POST | `/api/admin/tinvest/withdrawal` | Сохранить конфиг вывода |
+| GET | `/api/stream/tinvest` | SSE real-time цены T-Invest |
+| GET | `/api/tinvest/instruments` | Список акций (кэш 5мин) |
+| GET | `/api/tinvest/instrument/{ticker}` | Инструмент по тикеру |
+| GET | `/api/tinvest/prices` | Последние цены |
+| GET | `/api/tinvest/orderbook/{id}` | Стакан |
+| GET | `/api/tinvest/candles/{id}` | Свечи |
+| GET | `/api/tinvest/portfolio/{accountId}` | Портфель счёта |
+| GET | `/api/tinvest/margin/{accountId}` | Маржинальные показатели |
+| GET | `/api/tinvest/orders/{accountId}` | Активные ордера |
+| POST | `/api/tinvest/orders` | Выставить ордер |
+| POST | `/api/tinvest/orders/cancel` | Отменить ордер |
+| GET | `/api/tinvest/broker-portfolios` | Кэшированные портфели брокера |
 
 ## Серверные требования
 
@@ -318,10 +370,11 @@ MarketPulse_RU/
 │   ├── analyzer/              — Классификатор + скорер
 │   ├── alerts/                — Генерация + отправка алертов
 │   ├── market/moex/           — MOEX ISS API + свечи + batch quotes
+│   ├── market/tinvest/        — T-Invest gRPC клиент + streaming
 │   ├── stream/sse.go          — SSE broadcaster (real-time quotes)
 │   └── trading/
 │       ├── engine/            — Торговый движок
-│       ├── executor/          — Исполнение ордеров
+│       ├── executor/          — Исполнение ордеров (dry-run + broker)
 │       ├── indicators/        — TA индикаторы (15 шт.)
 │       ├── patterns/          — Свечные паттерны + дивергенции
 │       ├── signals/           — Генераторы сигналов
@@ -333,7 +386,7 @@ MarketPulse_RU/
     └── js/
         ├── app.js
         ├── api.js             — API + QuoteStream (SSE)
-        └── pages/             — Dashboard, Stocks, News, Settings...
+        └── pages/             — Dashboard, Stocks, News, Settings, TInvest...
 ```
 
 ## Лицензия
