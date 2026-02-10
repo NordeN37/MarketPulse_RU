@@ -68,7 +68,9 @@ func (m *Manager) IsSandbox() bool {
 // SetToken connects to T-Invest API with the given token.
 // If sandbox is true, connects to the sandbox endpoint.
 // Disconnects any existing connection first.
-func (m *Manager) SetToken(ctx context.Context, token string, sandbox bool) error {
+// Note: uses context.Background() internally because the SDK client must outlive
+// any single HTTP request — its lifecycle is managed via Disconnect().
+func (m *Manager) SetToken(token string, sandbox bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -105,9 +107,10 @@ func (m *Manager) SetToken(ctx context.Context, token string, sandbox bool) erro
 		MaxRetries:                    3,
 	}
 
-	// investgo needs a zap logger
+	// investgo needs a zap logger; use background context so the gRPC connection
+	// lives independently of any HTTP request context.
 	zapLog, _ := zap.NewProduction()
-	client, err := investgo.NewClient(ctx, cfg, zapLog.Sugar())
+	client, err := investgo.NewClient(context.Background(), cfg, zapLog.Sugar())
 	if err != nil {
 		return fmt.Errorf("T-Invest connect: %w", err)
 	}

@@ -92,7 +92,7 @@ func main() {
 	tiStreamer := tinvest.NewStreamer(tiManager, log)
 	// Restore token from Redis (if previously saved via admin UI)
 	if tiCfg, err := cache.ReadTInvestConfig(ctx); err == nil && tiCfg != nil && tiCfg.Token != "" {
-		if err := tiManager.SetToken(ctx, tiCfg.Token, tiCfg.Sandbox); err != nil {
+		if err := tiManager.SetToken(tiCfg.Token, tiCfg.Sandbox); err != nil {
 			log.Warn("T-Invest auto-connect failed (saved token)", "error", err)
 		} else {
 			// Auto-start streaming for monitored instruments
@@ -102,8 +102,11 @@ func main() {
 
 	// ---- Portfolio sync (real broker → cache) ----
 	portfolioSync := trading.NewPortfolioSync(tiManager, cache, log)
+	var psCancel context.CancelFunc
 	if tiManager.Connected() {
-		go portfolioSync.Run(ctx, 30*time.Second)
+		var psCtx context.Context
+		psCtx, psCancel = context.WithCancel(ctx)
+		go portfolioSync.Run(psCtx, 30*time.Second)
 	}
 
 	// Start SSE quote broadcaster (polls MOEX every 10s, pushes via SSE)
@@ -792,7 +795,7 @@ func main() {
 			return
 		}
 
-		if err := tiManager.SetToken(r.Context(), body.Token, body.Sandbox); err != nil {
+		if err := tiManager.SetToken(body.Token, body.Sandbox); err != nil {
 			writeError(w, http.StatusBadGateway, "Не удалось подключиться: "+err.Error())
 			return
 		}
@@ -807,13 +810,24 @@ func main() {
 
 		// Auto-start streaming and portfolio sync
 		go startTInvestStream(ctx, tiManager, tiStreamer, companyRepo, log)
-		go portfolioSync.Run(ctx, 30*time.Second)
+		// Cancel previous portfolio sync goroutine if running
+		if psCancel != nil {
+			psCancel()
+		}
+		var psCtx context.Context
+		psCtx, psCancel = context.WithCancel(ctx)
+		go portfolioSync.Run(psCtx, 30*time.Second)
 
 		writeJSON(w, http.StatusOK, tiManager.GetStatus())
 	})
 
 	// Disconnect
 	mux.HandleFunc("POST /api/admin/tinvest/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		tiStreamer.Stop()
+		if psCancel != nil {
+			psCancel()
+			psCancel = nil
+		}
 		tiManager.Disconnect()
 		if err := cache.DeleteTInvestConfig(r.Context()); err != nil {
 			log.Warn("failed to delete T-Invest config from Redis", "error", err)
