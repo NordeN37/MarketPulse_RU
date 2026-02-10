@@ -98,13 +98,28 @@
         },
 
         /** Trading signals */
-        getSignals: function () {
-            return request('/api/signals');
+        getSignals: function (ticker, source, limit) {
+            return request('/api/signals' + qs({ ticker: ticker, source: source, limit: limit }));
         },
 
-        /** Portfolios */
+        /** Portfolios config */
         getPortfolios: function () {
             return request('/api/portfolios');
+        },
+
+        /** Portfolio equity curve snapshots (from backtest) */
+        getPortfolioSnapshots: function (strategy) {
+            return request('/api/portfolio-snapshots' + qs({ strategy: strategy }));
+        },
+
+        /** Portfolio summary (latest per strategy) */
+        getPortfolioSummary: function () {
+            return request('/api/portfolio-summary');
+        },
+
+        /** Trade history */
+        getTrades: function (strategy, limit) {
+            return request('/api/trades' + qs({ strategy: strategy, limit: limit }));
         }
     };
 })();

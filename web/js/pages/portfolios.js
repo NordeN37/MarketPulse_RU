@@ -1,5 +1,6 @@
 /* ============================================================
    MarketPulse_RU — Portfolios Page
+   Fetches real backtest data from API, falls back to synthetic.
    ============================================================ */
 (function () {
     'use strict';
@@ -11,9 +12,9 @@
     var nextTick        = Vue.nextTick;
 
     var PORTFOLIO_COLORS = {
-        news:     '#58a6ff',   /* blue */
-        ta:       '#d29922',   /* orange */
-        combined: '#3fb950'    /* green */
+        news:     '#58a6ff',
+        ta:       '#d29922',
+        combined: '#3fb950'
     };
 
     var PORTFOLIO_LABELS = {
@@ -22,33 +23,24 @@
         combined: 'Комбинированный'
     };
 
-    /**
-     * Generate synthetic equity curve data.
-     * @param {number} startValue  — starting portfolio value
-     * @param {number} points      — number of data points
-     * @param {number} drift       — daily drift factor (positive = upward trend)
-     * @param {number} volatility  — daily volatility
-     * @returns {Array<{time: number, value: number}>}
-     */
+    var INITIAL = 50000;
+
+    /* ---------- Synthetic fallback generators ---------- */
+
     function generateEquityCurve(startValue, points, drift, volatility) {
         var data = [];
         var value = startValue;
         var now = new Date();
-        /* Start from `points` trading days ago */
         var startDate = new Date(now);
         startDate.setDate(startDate.getDate() - points);
-
         for (var i = 0; i < points; i++) {
             var date = new Date(startDate);
             date.setDate(date.getDate() + i);
-            /* Skip weekends */
             var dow = date.getDay();
             if (dow === 0 || dow === 6) continue;
-
             var change = drift + (Math.random() - 0.5) * 2 * volatility;
             value = value * (1 + change);
-            if (value < startValue * 0.5) value = startValue * 0.5; /* floor */
-
+            if (value < startValue * 0.5) value = startValue * 0.5;
             data.push({
                 time: Math.floor(date.getTime() / 1000),
                 value: Math.round(value * 100) / 100
@@ -57,9 +49,6 @@
         return data;
     }
 
-    /**
-     * Generate synthetic trade history.
-     */
     function generateTrades(ticker_list, count) {
         var trades = [];
         var directions = ['BUY', 'SELL'];
@@ -72,74 +61,83 @@
             var qty = Math.floor(1 + Math.random() * 10) * 10;
             var pnl = (Math.random() - 0.45) * price * qty * 0.05;
             trades.push({
-                id: i + 1,
-                date: d.toISOString(),
-                ticker: tick,
-                direction: dir,
-                price: Math.round(price * 100) / 100,
-                quantity: qty,
+                id: i + 1, date: d.toISOString(), ticker: tick, direction: dir, side: dir,
+                price: Math.round(price * 100) / 100, quantity: qty,
                 pnl: Math.round(pnl * 100) / 100
             });
         }
         return trades.reverse();
     }
 
-    /**
-     * Compute summary stats from equity curve.
-     */
-    function computeStats(curve, startValue) {
+    /* ---------- Convert API snapshots to chart data ---------- */
+
+    function snapshotsToChartData(snapshots) {
+        if (!snapshots || snapshots.length === 0) return [];
+        return snapshots.map(function (s) {
+            var ts = Math.floor(new Date(s.snapshot_at).getTime() / 1000);
+            return { time: ts, value: s.total_value };
+        });
+    }
+
+    function snapshotsToStats(snapshots) {
+        if (!snapshots || snapshots.length === 0) {
+            return { totalPnl: 0, winRate: 0, maxDrawdown: 0, totalTrades: 0 };
+        }
+        var last = snapshots[snapshots.length - 1];
+        return {
+            totalPnl: Math.round(last.total_pnl || 0),
+            winRate: Math.round((last.win_rate || 0) * 100),
+            maxDrawdown: Math.round((last.max_drawdown || 0) * 10000) / 100,
+            totalTrades: last.total_trades || 0
+        };
+    }
+
+    function computeStatsFromCurve(curve) {
         if (!curve || curve.length === 0) return { totalPnl: 0, winRate: 0, maxDrawdown: 0, totalTrades: 0 };
         var lastVal = curve[curve.length - 1].value;
-        var totalPnl = lastVal - startValue;
-        var peak = startValue;
+        var totalPnl = lastVal - INITIAL;
+        var peak = INITIAL;
         var maxDD = 0;
         for (var i = 0; i < curve.length; i++) {
             if (curve[i].value > peak) peak = curve[i].value;
             var dd = (peak - curve[i].value) / peak;
             if (dd > maxDD) maxDD = dd;
         }
-        /* Simulated win rate */
-        var winRate = 0.45 + Math.random() * 0.2;
-        var totalTrades = 20 + Math.floor(Math.random() * 40);
         return {
             totalPnl: Math.round(totalPnl),
-            winRate: Math.round(winRate * 100),
+            winRate: Math.round((0.45 + Math.random() * 0.2) * 100),
             maxDrawdown: Math.round(maxDD * 10000) / 100,
-            totalTrades: totalTrades
+            totalTrades: 20 + Math.floor(Math.random() * 40)
         };
     }
+
+    /* ---------- Component ---------- */
 
     window.PagePortfolios = {
         name: 'PagePortfolios',
         setup: function () {
             var portfolios = ref([]);
             var loading = ref(true);
+            var dataSource = ref('');  /* 'api' or 'synthetic' */
             var activePortfolio = ref(null);
 
-            /* Synthetic data */
             var equityCurves = reactive({});
             var stats = reactive({});
             var tradeHistory = reactive({});
 
-            /* Chart */
             var chartInstance = null;
             var resizeObserver = null;
 
-            var INITIAL = 50000;
             var TICKERS = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN', 'NVTK', 'ROSN'];
 
-            function generateAllData() {
-                /* News portfolio: slight negative drift (harder to trade on news alone) */
+            function useSyntheticData() {
+                dataSource.value = 'synthetic';
                 equityCurves.news = generateEquityCurve(INITIAL, 180, -0.0003, 0.012);
-                /* TA portfolio: neutral drift */
                 equityCurves.ta = generateEquityCurve(INITIAL, 180, 0.0001, 0.010);
-                /* Combined: slight positive drift */
                 equityCurves.combined = generateEquityCurve(INITIAL, 180, 0.0005, 0.008);
-
-                stats.news     = computeStats(equityCurves.news, INITIAL);
-                stats.ta       = computeStats(equityCurves.ta, INITIAL);
-                stats.combined = computeStats(equityCurves.combined, INITIAL);
-
+                stats.news     = computeStatsFromCurve(equityCurves.news);
+                stats.ta       = computeStatsFromCurve(equityCurves.ta);
+                stats.combined = computeStatsFromCurve(equityCurves.combined);
                 tradeHistory.news     = generateTrades(TICKERS, 25);
                 tradeHistory.ta       = generateTrades(TICKERS, 30);
                 tradeHistory.combined = generateTrades(TICKERS, 35);
@@ -149,10 +147,7 @@
                 var container = document.getElementById('portfolio-chart');
                 if (!container) return;
 
-                if (chartInstance) {
-                    chartInstance.remove();
-                    chartInstance = null;
-                }
+                if (chartInstance) { chartInstance.remove(); chartInstance = null; }
 
                 chartInstance = LightweightCharts.createChart(container, {
                     width: container.clientWidth,
@@ -165,19 +160,11 @@
                         vertLines: { color: '#21262d' },
                         horzLines: { color: '#21262d' }
                     },
-                    rightPriceScale: {
-                        borderColor: '#30363d'
-                    },
-                    timeScale: {
-                        borderColor: '#30363d',
-                        timeVisible: false
-                    },
-                    crosshair: {
-                        mode: LightweightCharts.CrosshairMode.Normal
-                    }
+                    rightPriceScale: { borderColor: '#30363d' },
+                    timeScale: { borderColor: '#30363d', timeVisible: false },
+                    crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
                 });
 
-                /* Add line series for each portfolio */
                 var types = ['news', 'ta', 'combined'];
                 types.forEach(function (type) {
                     var series = chartInstance.addLineSeries({
@@ -185,28 +172,28 @@
                         lineWidth: 2,
                         title: PORTFOLIO_LABELS[type]
                     });
-                    if (equityCurves[type]) {
+                    if (equityCurves[type] && equityCurves[type].length > 0) {
                         series.setData(equityCurves[type]);
                     }
                 });
 
-                /* Add baseline at starting value */
+                /* Baseline at initial capital */
                 var baseline = chartInstance.addLineSeries({
                     color: '#30363d',
                     lineWidth: 1,
                     lineStyle: LightweightCharts.LineStyle.Dashed,
                     title: 'Начальный капитал'
                 });
-                if (equityCurves.combined && equityCurves.combined.length >= 2) {
+                var ref_curve = equityCurves.combined || equityCurves.ta || equityCurves.news;
+                if (ref_curve && ref_curve.length >= 2) {
                     baseline.setData([
-                        { time: equityCurves.combined[0].time, value: INITIAL },
-                        { time: equityCurves.combined[equityCurves.combined.length - 1].time, value: INITIAL }
+                        { time: ref_curve[0].time, value: INITIAL },
+                        { time: ref_curve[ref_curve.length - 1].time, value: INITIAL }
                     ]);
                 }
 
                 chartInstance.timeScale().fitContent();
 
-                /* Auto-resize */
                 resizeObserver = new ResizeObserver(function (entries) {
                     if (chartInstance && entries.length) {
                         chartInstance.applyOptions({ width: entries[0].contentRect.width });
@@ -217,22 +204,31 @@
 
             function togglePortfolio(type) {
                 activePortfolio.value = activePortfolio.value === type ? null : type;
+                if (activePortfolio.value && !tradeHistory[type]) {
+                    fetchTradeHistory(type);
+                }
+            }
+
+            async function fetchTradeHistory(type) {
+                try {
+                    var data = await API.getTrades(type, 50);
+                    if (Array.isArray(data) && data.length > 0) {
+                        tradeHistory[type] = data;
+                    }
+                } catch (_) { /* keep existing synthetic */ }
             }
 
             function fmtMoney(v) {
                 return Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             }
-
             function fmtPrice(v) {
                 return Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             }
-
             function pnlClass(v) {
                 if (v > 0) return 'text-up';
                 if (v < 0) return 'text-down';
                 return 'text-flat';
             }
-
             function fmtDate(ts) {
                 return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
             }
@@ -240,12 +236,43 @@
             async function fetchPortfolios() {
                 loading.value = true;
                 try {
+                    /* 1. Get portfolio config */
                     var data = await API.getPortfolios();
                     portfolios.value = (data && data.portfolios) ? data.portfolios : [];
+
+                    /* 2. Try to load real backtest snapshots */
+                    var snapData = await API.getPortfolioSnapshots();
+                    var hasReal = false;
+                    var types = ['news', 'ta', 'combined'];
+                    types.forEach(function (type) {
+                        var snaps = snapData[type];
+                        if (snaps && snaps.length > 5) {
+                            hasReal = true;
+                            equityCurves[type] = snapshotsToChartData(snaps);
+                            stats[type] = snapshotsToStats(snaps);
+                        }
+                    });
+
+                    if (hasReal) {
+                        dataSource.value = 'api';
+                        /* Fetch real trades for trade history */
+                        types.forEach(function (type) {
+                            fetchTradeHistory(type);
+                        });
+                        /* Fill in any missing strategies with synthetic */
+                        types.forEach(function (type) {
+                            if (!equityCurves[type] || equityCurves[type].length === 0) {
+                                equityCurves[type] = generateEquityCurve(INITIAL, 180, 0, 0.010);
+                                stats[type] = computeStatsFromCurve(equityCurves[type]);
+                            }
+                        });
+                    } else {
+                        useSyntheticData();
+                    }
                 } catch (err) {
                     portfolios.value = [];
+                    useSyntheticData();
                 }
-                generateAllData();
                 loading.value = false;
                 nextTick(createChart);
             }
@@ -260,6 +287,7 @@
             return {
                 portfolios: portfolios,
                 loading: loading,
+                dataSource: dataSource,
                 activePortfolio: activePortfolio,
                 equityCurves: equityCurves,
                 stats: stats,
@@ -279,6 +307,8 @@
         <h1><i class="bi bi-briefcase me-2"></i>Портфели</h1>
         <p class="text-muted mb-0" style="font-size:0.85rem;">
             Сравнение трёх стратегий: новостная, техническая и комбинированная. Начальный капитал 50 000 RUB.
+            <span v-if="dataSource === 'api'" class="badge badge-buy ms-1" style="font-size:0.6rem;">Реальные данные</span>
+            <span v-else-if="dataSource === 'synthetic'" class="badge badge-ta ms-1" style="font-size:0.6rem;">Синтетические данные — запустите trader для бэктеста</span>
         </p>
     </div>
 
@@ -369,12 +399,12 @@
                             <tbody>
                                 <tr v-for="t in tradeHistory[activePortfolio]" :key="t.id">
                                     <td class="text-muted">{{ t.id }}</td>
-                                    <td>{{ fmtDate(t.date) }}</td>
+                                    <td>{{ fmtDate(t.date || t.exit_time) }}</td>
                                     <td class="fw-bold text-accent">{{ t.ticker }}</td>
                                     <td>
-                                        <span class="badge" :class="t.direction==='BUY'?'badge-buy':'badge-sell'">{{ t.direction === 'BUY' ? 'ПОКУПКА' : 'ПРОДАЖА' }}</span>
+                                        <span class="badge" :class="(t.direction||t.side)==='BUY'?'badge-buy':'badge-sell'">{{ (t.direction||t.side) === 'BUY' ? 'ПОКУПКА' : 'ПРОДАЖА' }}</span>
                                     </td>
-                                    <td class="text-end font-monospace">{{ fmtPrice(t.price) }}</td>
+                                    <td class="text-end font-monospace">{{ fmtPrice(t.price || t.entry_price) }}</td>
                                     <td class="text-end">{{ t.quantity }}</td>
                                     <td class="text-end font-monospace" :class="pnlClass(t.pnl)">
                                         {{ t.pnl >= 0 ? '+' : '' }}{{ fmtPrice(t.pnl) }}

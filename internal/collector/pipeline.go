@@ -29,21 +29,23 @@ func NewPipeline(newsRepo *postgres.NewsRepo, cache *redis.Client, log *slog.Log
 // HandleNews is the main entry point for all news sources.
 // It deduplicates, normalizes, stores, and enqueues the news item.
 func (p *Pipeline) HandleNews(ctx context.Context, news *domain.News) error {
-	// 1. Dedup via Redis (fast check)
-	isDup, err := p.cache.Dedup(ctx, string(news.Source), news.ExternalID, 0)
-	if err != nil {
-		p.log.Warn("dedup check failed, falling back to DB",
-			"source", news.Source,
-			"external_id", news.ExternalID,
-			"error", err,
-		)
-	}
-	if isDup {
-		p.log.Debug("duplicate news skipped",
-			"source", news.Source,
-			"external_id", news.ExternalID,
-		)
-		return nil
+	// 1. Dedup via Redis (fast check), skip if cache is nil.
+	if p.cache != nil {
+		isDup, err := p.cache.Dedup(ctx, string(news.Source), news.ExternalID, 0)
+		if err != nil {
+			p.log.Warn("dedup check failed, falling back to DB",
+				"source", news.Source,
+				"external_id", news.ExternalID,
+				"error", err,
+			)
+		}
+		if isDup {
+			p.log.Debug("duplicate news skipped",
+				"source", news.Source,
+				"external_id", news.ExternalID,
+			)
+			return nil
+		}
 	}
 
 	// 2. Store in PostgreSQL
@@ -66,13 +68,15 @@ func (p *Pipeline) HandleNews(ctx context.Context, news *domain.News) error {
 		"title", truncate(news.Title, 80),
 	)
 
-	// 3. Enqueue for LLM analysis
-	if err := p.cache.EnqueueNews(ctx, id); err != nil {
-		p.log.Error("failed to enqueue news for analysis",
-			"news_id", id,
-			"error", err,
-		)
-		// Don't return error — the news is already stored
+	// 3. Enqueue for LLM analysis (skip if cache is nil).
+	if p.cache != nil {
+		if err := p.cache.EnqueueNews(ctx, id); err != nil {
+			p.log.Error("failed to enqueue news for analysis",
+				"news_id", id,
+				"error", err,
+			)
+			// Don't return error — the news is already stored
+		}
 	}
 
 	return nil

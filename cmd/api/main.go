@@ -62,6 +62,9 @@ func main() {
 	companyRepo := postgres.NewCompanyRepo(db)
 	heatRepo := postgres.NewHeatRepo(db)
 	alertRepo := postgres.NewAlertRepo(db)
+	signalRepo := postgres.NewSignalRepo(db)
+	portfolioRepo := postgres.NewPortfolioRepo(db)
+	tradeRepo := postgres.NewTradeRepo(db)
 	moexClient := moex.NewClient(cfg.MOEX, log)
 
 	// Setup HTTP routes
@@ -235,12 +238,36 @@ func main() {
 	})
 
 	// =====================================================
-	// Trading signals (demo data when DB is empty)
+	// Trading signals (from DB, populated by backtest/live)
 	// =====================================================
 	mux.HandleFunc("GET /api/signals", func(w http.ResponseWriter, r *http.Request) {
-		// Return configured tickers as reference for demo.
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit <= 0 || limit > 200 {
+			limit = 50
+		}
+		ticker := r.URL.Query().Get("ticker")
+		source := r.URL.Query().Get("source")
+
+		var sigs []domain.Signal
+		var sigErr error
+
+		switch {
+		case ticker != "":
+			sigs, sigErr = signalRepo.GetByTicker(r.Context(), ticker, limit)
+		case source != "":
+			sigs, sigErr = signalRepo.GetBySource(r.Context(), source, limit)
+		default:
+			sigs, sigErr = signalRepo.GetRecent(r.Context(), limit)
+		}
+		if sigErr != nil {
+			writeError(w, http.StatusInternalServerError, sigErr.Error())
+			return
+		}
+		if sigs == nil {
+			sigs = []domain.Signal{}
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
-			"signals": []any{},
+			"signals": sigs,
 			"tickers": cfg.Trading.Tickers,
 			"mode":    cfg.Trading.Mode,
 		})
@@ -277,6 +304,69 @@ func main() {
 			"risk":     cfg.Trading.Risk,
 			"strategy": cfg.Trading.Strategy,
 		})
+	})
+
+	// =====================================================
+	// Portfolio equity curves (from backtesting)
+	// =====================================================
+	mux.HandleFunc("GET /api/portfolio-snapshots", func(w http.ResponseWriter, r *http.Request) {
+		strat := r.URL.Query().Get("strategy")
+		if strat == "" {
+			// Return all 3 strategies.
+			result := make(map[string]any)
+			for _, s := range []string{"news", "ta", "combined"} {
+				snaps, err := portfolioRepo.GetByStrategy(r.Context(), s)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				result[s] = snaps
+			}
+			writeJSON(w, http.StatusOK, result)
+			return
+		}
+		snaps, err := portfolioRepo.GetByStrategy(r.Context(), strat)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if snaps == nil {
+			snaps = []postgres.PortfolioSnapshot{}
+		}
+		writeJSON(w, http.StatusOK, snaps)
+	})
+
+	// Portfolio summary (latest snapshot per strategy).
+	mux.HandleFunc("GET /api/portfolio-summary", func(w http.ResponseWriter, r *http.Request) {
+		latest, err := portfolioRepo.GetLatest(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, latest)
+	})
+
+	// =====================================================
+	// Trade history
+	// =====================================================
+	mux.HandleFunc("GET /api/trades", func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		if limit <= 0 || limit > 200 {
+			limit = 50
+		}
+		strat := r.URL.Query().Get("strategy")
+		var trades []postgres.TradeRecord
+		var trErr error
+		if strat != "" {
+			trades, trErr = tradeRepo.GetByStrategy(r.Context(), strat, limit)
+		} else {
+			trades, trErr = tradeRepo.GetRecent(r.Context(), limit)
+		}
+		if trErr != nil {
+			writeError(w, http.StatusInternalServerError, trErr.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, trades)
 	})
 
 	// =====================================================

@@ -1,4 +1,4 @@
-.PHONY: build run-collector run-analyzer run-api run-alerter run-trader infra-up infra-down tidy test lint
+.PHONY: build run-collector run-analyzer run-api run-alerter run-trader run-trader-skip infra-up infra-down tidy test lint
 
 # Build all binaries
 build: tidy
@@ -23,6 +23,10 @@ run-alerter:
 
 run-trader:
 	go run ./cmd/trader -config configs/config.yaml
+
+# Run trader without startup backtest (skip backfill)
+run-trader-skip:
+	go run ./cmd/trader -config configs/config.yaml -skip-backtest
 
 # Infrastructure
 infra-up:
