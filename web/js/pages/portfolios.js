@@ -23,6 +23,7 @@
         combined: 'Комбинированный'
     };
 
+    var IMOEX_COLOR = '#bc8cff';
     var INITIAL = 50000;
 
     /* ---------- Synthetic fallback generators ---------- */
@@ -111,6 +112,28 @@
         };
     }
 
+    /**
+     * Normalize IMOEX candle data to match portfolio scale.
+     * First point = INITIAL (50000 RUB).
+     */
+    function normalizeIndexToEquity(candles) {
+        if (!candles || candles.length === 0) return [];
+        var first = candles[0].close || candles[0].Close;
+        if (!first || first === 0) return [];
+        var data = [];
+        for (var i = 0; i < candles.length; i++) {
+            var c = candles[i];
+            var close = c.close || c.Close;
+            var ts = c.open_time || c.OpenTime;
+            if (!close || !ts) continue;
+            data.push({
+                time: ts,
+                value: Math.round((close / first) * INITIAL * 100) / 100
+            });
+        }
+        return data;
+    }
+
     /* ---------- Component ---------- */
 
     window.PagePortfolios = {
@@ -118,10 +141,11 @@
         setup: function () {
             var portfolios = ref([]);
             var loading = ref(true);
-            var dataSource = ref('');  /* 'api' or 'synthetic' */
+            var dataSource = ref('');
             var activePortfolio = ref(null);
 
             var equityCurves = reactive({});
+            var imoexCurve = ref([]);
             var stats = reactive({});
             var tradeHistory = reactive({});
 
@@ -177,6 +201,17 @@
                     }
                 });
 
+                /* IMOEX benchmark line (normalized to initial capital) */
+                if (imoexCurve.value && imoexCurve.value.length > 0) {
+                    var imoexSeries = chartInstance.addLineSeries({
+                        color: IMOEX_COLOR,
+                        lineWidth: 1,
+                        lineStyle: LightweightCharts.LineStyle.Dotted,
+                        title: 'IMOEX'
+                    });
+                    imoexSeries.setData(imoexCurve.value);
+                }
+
                 /* Baseline at initial capital */
                 var baseline = chartInstance.addLineSeries({
                     color: '#30363d',
@@ -218,6 +253,15 @@
                 } catch (_) { /* keep existing synthetic */ }
             }
 
+            async function fetchIMOEX() {
+                try {
+                    var candles = await API.getIndexCandles('IMOEX', '1d', 365);
+                    if (Array.isArray(candles) && candles.length > 0) {
+                        imoexCurve.value = normalizeIndexToEquity(candles);
+                    }
+                } catch (_) { /* IMOEX optional, ignore errors */ }
+            }
+
             function fmtMoney(v) {
                 return Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
             }
@@ -236,11 +280,12 @@
             async function fetchPortfolios() {
                 loading.value = true;
                 try {
-                    /* 1. Get portfolio config */
                     var data = await API.getPortfolios();
                     portfolios.value = (data && data.portfolios) ? data.portfolios : [];
 
-                    /* 2. Try to load real backtest snapshots */
+                    /* Fetch IMOEX benchmark in parallel */
+                    fetchIMOEX();
+
                     var snapData = await API.getPortfolioSnapshots();
                     var hasReal = false;
                     var types = ['news', 'ta', 'combined'];
@@ -255,11 +300,9 @@
 
                     if (hasReal) {
                         dataSource.value = 'api';
-                        /* Fetch real trades for trade history */
                         types.forEach(function (type) {
                             fetchTradeHistory(type);
                         });
-                        /* Fill in any missing strategies with synthetic */
                         types.forEach(function (type) {
                             if (!equityCurves[type] || equityCurves[type].length === 0) {
                                 equityCurves[type] = generateEquityCurve(INITIAL, 180, 0, 0.010);
@@ -274,7 +317,8 @@
                     useSyntheticData();
                 }
                 loading.value = false;
-                nextTick(createChart);
+                /* Wait briefly for IMOEX fetch before creating chart */
+                setTimeout(function () { nextTick(createChart); }, 300);
             }
 
             onMounted(fetchPortfolios);
@@ -323,10 +367,11 @@
             <div class="mp-card mb-4">
                 <div class="mp-card-header">
                     <h6 class="mp-card-header__title">Кривые доходности</h6>
-                    <div class="d-flex gap-3" style="font-size:0.75rem;">
+                    <div class="d-flex gap-3 flex-wrap" style="font-size:0.75rem;">
                         <span><span style="display:inline-block;width:12px;height:3px;background:#58a6ff;vertical-align:middle;margin-right:4px;"></span>Новостной</span>
                         <span><span style="display:inline-block;width:12px;height:3px;background:#d29922;vertical-align:middle;margin-right:4px;"></span>Технический</span>
                         <span><span style="display:inline-block;width:12px;height:3px;background:#3fb950;vertical-align:middle;margin-right:4px;"></span>Комбинированный</span>
+                        <span><span style="display:inline-block;width:12px;height:3px;background:#bc8cff;vertical-align:middle;margin-right:4px;border-bottom:1px dotted #bc8cff;"></span>IMOEX</span>
                     </div>
                 </div>
                 <div id="portfolio-chart" class="mp-chart-container-full"></div>

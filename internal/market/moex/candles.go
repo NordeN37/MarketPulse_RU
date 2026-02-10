@@ -117,6 +117,98 @@ func (c *Client) GetCandles(ctx context.Context, ticker string, interval int, fr
 	return candles, nil
 }
 
+// GetIndexCandles fetches historical candles for an index (e.g. IMOEX).
+// Uses the /engines/stock/markets/index/ endpoint instead of shares.
+func (c *Client) GetIndexCandles(ctx context.Context, index string, interval int, from, till time.Time) ([]domain.Candle, error) {
+	intervalStr, ok := IntervalToString[interval]
+	if !ok {
+		return nil, fmt.Errorf("unsupported interval: %d", interval)
+	}
+
+	url := fmt.Sprintf(
+		"%s/engines/stock/markets/index/boards/SNDX/securities/%s/candles.json?from=%s&till=%s&interval=%d&iss.meta=off",
+		c.baseURL, index,
+		from.Format("2006-01-02"), till.Format("2006-01-02"),
+		interval,
+	)
+
+	data, err := c.doRequest(ctx, url)
+	if err != nil {
+		return nil, fmt.Errorf("fetching index candles for %s: %w", index, err)
+	}
+
+	var resp candleResponse
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("parsing index candle response: %w", err)
+	}
+
+	if len(resp.Candles.Data) == 0 {
+		return nil, nil
+	}
+
+	colIdx := makeColumnIndex(resp.Candles.Columns)
+	candles := make([]domain.Candle, 0, len(resp.Candles.Data))
+
+	for _, row := range resp.Candles.Data {
+		candle := domain.Candle{
+			Ticker:   index,
+			Interval: intervalStr,
+		}
+		if idx, ok := colIdx["open"]; ok && row[idx] != nil {
+			candle.Open, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["high"]; ok && row[idx] != nil {
+			candle.High, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["low"]; ok && row[idx] != nil {
+			candle.Low, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["close"]; ok && row[idx] != nil {
+			candle.Close, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["volume"]; ok && row[idx] != nil {
+			candle.Volume, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["begin"]; ok && row[idx] != nil {
+			if ts, ok := row[idx].(string); ok {
+				t, err := time.Parse("2006-01-02 15:04:05", ts)
+				if err == nil {
+					candle.OpenTime = t.Unix()
+				}
+			}
+		}
+		candles = append(candles, candle)
+	}
+
+	c.log.Debug("fetched index candles", "index", index, "interval", intervalStr, "count", len(candles))
+	return candles, nil
+}
+
+// GetIndexCandlesAll fetches index candles with pagination.
+func (c *Client) GetIndexCandlesAll(ctx context.Context, index string, interval int, from, till time.Time) ([]domain.Candle, error) {
+	var all []domain.Candle
+	cursor := from
+
+	for cursor.Before(till) {
+		batch, err := c.GetIndexCandles(ctx, index, interval, cursor, till)
+		if err != nil {
+			return all, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		all = append(all, batch...)
+		lastTime := time.Unix(batch[len(batch)-1].OpenTime, 0)
+		nextCursor := lastTime.Add(time.Second)
+		if !nextCursor.After(cursor) {
+			break
+		}
+		cursor = nextCursor
+	}
+
+	return all, nil
+}
+
 // GetCandlesAll fetches candles with pagination for large date ranges.
 // MOEX ISS returns ~500 candles max per request, so we paginate.
 func (c *Client) GetCandlesAll(ctx context.Context, ticker string, interval int, from, till time.Time) ([]domain.Candle, error) {

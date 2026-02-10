@@ -83,17 +83,41 @@ func main() {
 		})
 	})
 
-	// News endpoints
+	// News endpoints — supports category, ticker (via impacts), search, related
 	mux.HandleFunc("GET /api/news", func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 		if limit <= 0 || limit > 100 {
 			limit = 20
 		}
-		news, err := newsRepo.GetRecent(r.Context(), limit, offset)
+
+		ticker := r.URL.Query().Get("ticker")
+		category := r.URL.Query().Get("category")
+		search := r.URL.Query().Get("q")
+		related := r.URL.Query().Get("related") == "1"
+
+		// If ticker specified, search via news_impacts.
+		if ticker != "" {
+			news, err := newsRepo.GetNewsByCompanyTicker(r.Context(), ticker, limit, related)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			if news == nil {
+				news = []postgres.NewsWithAnalysis{}
+			}
+			writeJSON(w, http.StatusOK, news)
+			return
+		}
+
+		// Otherwise return news with analysis (optional category/search filter).
+		news, err := newsRepo.GetRecentWithAnalysis(r.Context(), limit, offset, category, search)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if news == nil {
+			news = []postgres.NewsWithAnalysis{}
 		}
 		writeJSON(w, http.StatusOK, news)
 	})
@@ -110,6 +134,19 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, news)
+	})
+
+	// News categories (for filter dropdown)
+	mux.HandleFunc("GET /api/news/categories", func(w http.ResponseWriter, r *http.Request) {
+		cats, err := newsRepo.GetCategories(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if cats == nil {
+			cats = []string{}
+		}
+		writeJSON(w, http.StatusOK, cats)
 	})
 
 	// Company endpoints
@@ -230,6 +267,36 @@ func main() {
 		from := now.AddDate(0, 0, -days)
 
 		candles, err := moexClient.GetCandlesAll(r.Context(), ticker, interval, from, now)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, candles)
+	})
+
+	// =====================================================
+	// Index candle data (IMOEX, etc.)
+	// =====================================================
+	mux.HandleFunc("GET /api/index-candles/{index}", func(w http.ResponseWriter, r *http.Request) {
+		index := r.PathValue("index")
+		intervalStr := r.URL.Query().Get("interval")
+		if intervalStr == "" {
+			intervalStr = "1d"
+		}
+		interval, ok := moex.StringToInterval[intervalStr]
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid interval")
+			return
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days <= 0 || days > 730 {
+			days = 365
+		}
+
+		now := time.Now()
+		from := now.AddDate(0, 0, -days)
+
+		candles, err := moexClient.GetIndexCandlesAll(r.Context(), index, interval, from, now)
 		if err != nil {
 			writeError(w, http.StatusBadGateway, err.Error())
 			return

@@ -163,6 +163,212 @@ func (r *NewsRepo) SaveImpact(ctx context.Context, imp *domain.NewsImpact) error
 	return err
 }
 
+// NewsWithAnalysis combines a news item with its optional LLM analysis and impacts.
+type NewsWithAnalysis struct {
+	domain.News
+	Category  string  `json:"category,omitempty"`
+	Sentiment float64 `json:"sentiment"`
+	Urgency   int     `json:"urgency,omitempty"`
+	SummaryRU string  `json:"summary_ru,omitempty"`
+	LLMModel  string  `json:"llm_model,omitempty"`
+	Analyzed  bool    `json:"analyzed"`
+}
+
+// GetRecentWithAnalysis returns news with LEFT JOIN on analysis for category/sentiment.
+// Supports optional category filter and text search.
+func (r *NewsRepo) GetRecentWithAnalysis(ctx context.Context, limit, offset int, category, search string) ([]NewsWithAnalysis, error) {
+	query := `
+		SELECT n.id, n.external_id, n.source, n.source_channel, n.title, n.content,
+		       n.url, n.media_urls, n.published_at, n.collected_at,
+		       COALESCE(na.category, ''), COALESCE(na.sentiment, 0),
+		       COALESCE(na.urgency, 0), COALESCE(na.summary_ru, ''),
+		       COALESCE(na.llm_model, ''), (na.id IS NOT NULL) AS analyzed
+		FROM news n
+		LEFT JOIN news_analysis na ON na.news_id = n.id
+		WHERE 1=1`
+	args := []any{}
+	argN := 1
+
+	if category != "" {
+		query += fmt.Sprintf(" AND na.category = $%d", argN)
+		args = append(args, category)
+		argN++
+	}
+	if search != "" {
+		query += fmt.Sprintf(" AND (n.title ILIKE '%%' || $%d || '%%' OR n.content ILIKE '%%' || $%d || '%%')", argN, argN)
+		args = append(args, search)
+		argN++
+	}
+
+	query += " ORDER BY n.published_at DESC"
+	query += fmt.Sprintf(" LIMIT $%d OFFSET $%d", argN, argN+1)
+	args = append(args, limit, offset)
+
+	rows, err := r.db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("querying news with analysis: %w", err)
+	}
+	defer rows.Close()
+
+	var result []NewsWithAnalysis
+	for rows.Next() {
+		var nw NewsWithAnalysis
+		if err := rows.Scan(
+			&nw.ID, &nw.ExternalID, &nw.Source, &nw.SourceChannel,
+			&nw.Title, &nw.Content, &nw.URL, &nw.MediaURLs,
+			&nw.PublishedAt, &nw.CollectedAt,
+			&nw.Category, &nw.Sentiment, &nw.Urgency,
+			&nw.SummaryRU, &nw.LLMModel, &nw.Analyzed,
+		); err != nil {
+			return nil, fmt.Errorf("scanning news with analysis: %w", err)
+		}
+		result = append(result, nw)
+	}
+	return result, rows.Err()
+}
+
+// GetNewsByCompanyTicker returns news that impact a specific company (via news_impacts).
+func (r *NewsRepo) GetNewsByCompanyTicker(ctx context.Context, ticker string, limit int, includeRelated bool) ([]NewsWithAnalysis, error) {
+	query := `
+		SELECT DISTINCT ON (n.id)
+		       n.id, n.external_id, n.source, n.source_channel, n.title, n.content,
+		       n.url, n.media_urls, n.published_at, n.collected_at,
+		       COALESCE(na.category, ''), COALESCE(na.sentiment, 0),
+		       COALESCE(na.urgency, 0), COALESCE(na.summary_ru, ''),
+		       COALESCE(na.llm_model, ''), (na.id IS NOT NULL) AS analyzed
+		FROM news n
+		LEFT JOIN news_analysis na ON na.news_id = n.id
+		JOIN news_impacts ni ON ni.news_id = n.id
+		WHERE ni.entity_name = $1
+		ORDER BY n.id, n.published_at DESC
+		LIMIT $2`
+	rows, err := r.db.Pool.Query(ctx, query, ticker, limit)
+	if err != nil {
+		return nil, fmt.Errorf("querying news by company ticker: %w", err)
+	}
+	defer rows.Close()
+
+	var result []NewsWithAnalysis
+	for rows.Next() {
+		var nw NewsWithAnalysis
+		if err := rows.Scan(
+			&nw.ID, &nw.ExternalID, &nw.Source, &nw.SourceChannel,
+			&nw.Title, &nw.Content, &nw.URL, &nw.MediaURLs,
+			&nw.PublishedAt, &nw.CollectedAt,
+			&nw.Category, &nw.Sentiment, &nw.Urgency,
+			&nw.SummaryRU, &nw.LLMModel, &nw.Analyzed,
+		); err != nil {
+			return nil, fmt.Errorf("scanning company news: %w", err)
+		}
+		result = append(result, nw)
+	}
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	if !includeRelated || len(result) == 0 {
+		return result, nil
+	}
+
+	// Find related news: news that share impacts with the same sectors/commodities
+	// as the news already found for this ticker.
+	newsIDs := make([]int64, len(result))
+	for i, nw := range result {
+		newsIDs[i] = nw.ID
+	}
+
+	relQuery := `
+		SELECT DISTINCT ON (n.id)
+		       n.id, n.external_id, n.source, n.source_channel, n.title, n.content,
+		       n.url, n.media_urls, n.published_at, n.collected_at,
+		       COALESCE(na.category, ''), COALESCE(na.sentiment, 0),
+		       COALESCE(na.urgency, 0), COALESCE(na.summary_ru, ''),
+		       COALESCE(na.llm_model, ''), (na.id IS NOT NULL) AS analyzed
+		FROM news n
+		LEFT JOIN news_analysis na ON na.news_id = n.id
+		JOIN news_impacts ni ON ni.news_id = n.id
+		WHERE ni.entity_type IN ('sector', 'commodity')
+		  AND ni.entity_id IN (
+		      SELECT entity_id FROM news_impacts
+		      WHERE news_id = ANY($1) AND entity_type IN ('sector', 'commodity')
+		  )
+		  AND n.id != ALL($1)
+		ORDER BY n.id, n.published_at DESC
+		LIMIT $2`
+	relRows, err := r.db.Pool.Query(ctx, relQuery, newsIDs, limit)
+	if err != nil {
+		return result, nil // return direct results even if related query fails
+	}
+	defer relRows.Close()
+
+	for relRows.Next() {
+		var nw NewsWithAnalysis
+		if err := relRows.Scan(
+			&nw.ID, &nw.ExternalID, &nw.Source, &nw.SourceChannel,
+			&nw.Title, &nw.Content, &nw.URL, &nw.MediaURLs,
+			&nw.PublishedAt, &nw.CollectedAt,
+			&nw.Category, &nw.Sentiment, &nw.Urgency,
+			&nw.SummaryRU, &nw.LLMModel, &nw.Analyzed,
+		); err != nil {
+			break
+		}
+		result = append(result, nw)
+	}
+
+	return result, nil
+}
+
+// GetCategories returns all distinct categories from analyzed news.
+func (r *NewsRepo) GetCategories(ctx context.Context) ([]string, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT DISTINCT category FROM news_analysis
+		WHERE category != '' ORDER BY category`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cats []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			return nil, err
+		}
+		cats = append(cats, c)
+	}
+	return cats, rows.Err()
+}
+
+// ImpactRow is a simplified impact record for bulk loading.
+type ImpactRow struct {
+	NewsID     int64
+	EntityName string
+	Direction  domain.ImpactDirection
+	Magnitude  float64
+}
+
+// QueryImpactsByTickers returns all impacts for the given entity names (tickers).
+func (r *NewsRepo) QueryImpactsByTickers(ctx context.Context, tickers []string) ([]ImpactRow, error) {
+	rows, err := r.db.Pool.Query(ctx, `
+		SELECT news_id, entity_name, impact_direction, impact_magnitude
+		FROM news_impacts
+		WHERE entity_name = ANY($1)
+		ORDER BY news_id`, tickers)
+	if err != nil {
+		return nil, fmt.Errorf("querying impacts by tickers: %w", err)
+	}
+	defer rows.Close()
+
+	var result []ImpactRow
+	for rows.Next() {
+		var row ImpactRow
+		if err := rows.Scan(&row.NewsID, &row.EntityName, &row.Direction, &row.Magnitude); err != nil {
+			return nil, err
+		}
+		result = append(result, row)
+	}
+	return result, rows.Err()
+}
+
 // GetAnalyzedNewsSince returns analyzed news with their analysis from a given time.
 func (r *NewsRepo) GetAnalyzedNewsSince(ctx context.Context, since time.Time, limit int) ([]domain.News, []domain.NewsAnalysis, error) {
 	rows, err := r.db.Pool.Query(ctx, `

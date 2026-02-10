@@ -49,14 +49,26 @@
             return request('/api/health');
         },
 
-        /** News — paginated list */
-        getNews: function (limit, offset) {
-            return request('/api/news' + qs({ limit: limit, offset: offset }));
+        /** News — paginated list with optional filters */
+        getNews: function (limit, offset, opts) {
+            var params = { limit: limit, offset: offset };
+            if (opts) {
+                if (opts.category) params.category = opts.category;
+                if (opts.ticker) params.ticker = opts.ticker;
+                if (opts.q) params.q = opts.q;
+                if (opts.related) params.related = '1';
+            }
+            return request('/api/news' + qs(params));
         },
 
         /** Single news item by ID */
         getNewsById: function (id) {
             return request('/api/news/' + id);
+        },
+
+        /** Available news categories */
+        getNewsCategories: function () {
+            return request('/api/news/categories');
         },
 
         /** All companies (optionally filtered by search query) */
@@ -83,6 +95,14 @@
         getCandles: function (ticker, interval, days) {
             return request(
                 '/api/candles/' + encodeURIComponent(ticker) +
+                qs({ interval: interval, days: days })
+            );
+        },
+
+        /** Index candle data (IMOEX, etc.) */
+        getIndexCandles: function (index, interval, days) {
+            return request(
+                '/api/index-candles/' + encodeURIComponent(index) +
                 qs({ interval: interval, days: days })
             );
         },

@@ -12,16 +12,28 @@ import (
 	"github.com/NordeN37/MarketPulse_RU/internal/trading/strategy"
 )
 
+// newsEvent represents a pre-loaded analyzed news event for backtest use.
+type newsEvent struct {
+	timestamp int64   // unix seconds
+	sentiment float64 // -1 to +1
+	urgency   int     // 1-5
+	direction int     // -1, 0, +1 (from impact)
+	magnitude float64 // 0-1
+}
+
 // BacktestService runs backtests for all 3 strategies and stores equity curves.
 type BacktestService struct {
 	candleBackfill *CandleBackfill
 	portfolioRepo  *postgres.PortfolioRepo
 	tradeRepo      *postgres.TradeRepo
 	signalRepo     *postgres.SignalRepo
+	newsRepo       *postgres.NewsRepo
 	log            *slog.Logger
 	initialCash    float64
 	stopLossPct    float64
 	takeProfitPct  float64
+	// Pre-loaded news events per ticker (populated in RunAll).
+	newsEvents map[string][]newsEvent
 }
 
 // NewBacktestService creates a backtest service.
@@ -44,7 +56,14 @@ func NewBacktestService(
 		initialCash:    initialCash,
 		stopLossPct:    stopLossPct,
 		takeProfitPct:  takeProfitPct,
+		newsEvents:     make(map[string][]newsEvent),
 	}
+}
+
+// WithNewsRepo enables LLM-analyzed news for news signal generation.
+func (s *BacktestService) WithNewsRepo(repo *postgres.NewsRepo) *BacktestService {
+	s.newsRepo = repo
+	return s
 }
 
 // BacktestResult holds results and equity curve for one strategy.
@@ -60,6 +79,11 @@ func (s *BacktestService) RunAll(ctx context.Context, tickers []string) ([]Backt
 		"tickers", tickers,
 		"initial_cash", s.initialCash,
 	)
+
+	// Pre-load analyzed news for news-based strategies.
+	if s.newsRepo != nil {
+		s.preloadNewsEvents(ctx, tickers)
+	}
 
 	strategies := []struct {
 		name string
@@ -201,36 +225,25 @@ func (s *BacktestService) makeSignalFunc(mode domain.TradingMode, taGen *signals
 		}
 
 	case domain.ModeNews:
-		// For news-only backtest without historical analyzed news,
-		// use a simplified sentiment proxy based on price momentum.
-		return func(candles []domain.Candle, i int) (domain.SignalDirection, float64) {
-			if i < 20 {
-				return domain.SignalHold, 0
-			}
-			// 5-day momentum as sentiment proxy.
-			momentum := (candles[i].Close - candles[i-5].Close) / candles[i-5].Close
-			// Volume surge as news catalyst proxy.
-			avgVol := 0.0
-			for j := i - 10; j < i; j++ {
-				avgVol += candles[j].Volume
-			}
-			avgVol /= 10
-			volSurge := 1.0
-			if avgVol > 0 {
-				volSurge = candles[i].Volume / avgVol
-			}
-
-			// Strong momentum + volume surge = signal.
-			if momentum > 0.02 && volSurge > 1.5 {
-				return domain.SignalBuy, clamp(momentum*5, 0.3, 1.0)
-			}
-			if momentum < -0.02 && volSurge > 1.5 {
-				return domain.SignalSell, clamp(-momentum*5, 0.3, 1.0)
-			}
-			return domain.SignalHold, 0
+		events := s.newsEvents[ticker]
+		if len(events) > 0 {
+			// Use real LLM-analyzed news signals.
+			s.log.Debug("using LLM news signals for backtest", "ticker", ticker, "events", len(events))
+			return s.makeNewsSignalFromLLM(events)
 		}
+		// Fallback: momentum + volume proxy when no analyzed news available.
+		return s.makeNewsSignalProxy()
 
 	case domain.ModeCombined:
+		events := s.newsEvents[ticker]
+		hasLLMNews := len(events) > 0
+		if hasLLMNews {
+			s.log.Debug("using LLM news in combined backtest", "ticker", ticker, "events", len(events))
+		}
+		newsFn := s.makeNewsSignalProxy()
+		if hasLLMNews {
+			newsFn = s.makeNewsSignalFromLLM(events)
+		}
 		return func(candles []domain.Candle, i int) (domain.SignalDirection, float64) {
 			if i < 50 {
 				return domain.SignalHold, 0
@@ -239,28 +252,8 @@ func (s *BacktestService) makeSignalFunc(mode domain.TradingMode, taGen *signals
 			analysis := taGen.Analyze(ticker, "1d", candles)
 			taSig := taGen.Generate(analysis)
 
-			// News proxy component (momentum + volume).
-			var newsDir domain.SignalDirection = domain.SignalHold
-			newsStr := 0.0
-			if i >= 20 {
-				momentum := (candles[i].Close - candles[i-5].Close) / candles[i-5].Close
-				avgVol := 0.0
-				for j := i - 10; j < i; j++ {
-					avgVol += candles[j].Volume
-				}
-				avgVol /= 10
-				volSurge := 1.0
-				if avgVol > 0 {
-					volSurge = candles[i].Volume / avgVol
-				}
-				if momentum > 0.015 && volSurge > 1.3 {
-					newsDir = domain.SignalBuy
-					newsStr = clamp(momentum*4, 0.2, 0.8)
-				} else if momentum < -0.015 && volSurge > 1.3 {
-					newsDir = domain.SignalSell
-					newsStr = clamp(-momentum*4, 0.2, 0.8)
-				}
-			}
+			// News component (LLM or proxy).
+			newsDir, newsStr := newsFn(candles, i)
 
 			// Combine with 60% news / 40% TA.
 			taScore := 0.0
@@ -414,6 +407,146 @@ func clamp(v, min, max float64) float64 {
 	}
 	if v > max {
 		return max
+	}
+	return v
+}
+
+// preloadNewsEvents loads analyzed news with impacts for all tickers into memory.
+func (s *BacktestService) preloadNewsEvents(ctx context.Context, tickers []string) {
+	since := time.Now().AddDate(-2, 0, 0) // last 2 years
+	news, analyses, err := s.newsRepo.GetAnalyzedNewsSince(ctx, since, 10000)
+	if err != nil || len(news) == 0 {
+		s.log.Info("no analyzed news available for backtest", "error", err)
+		return
+	}
+
+	// Build analysis map by news_id.
+	analysisMap := make(map[int64]*domain.NewsAnalysis, len(analyses))
+	for i := range analyses {
+		analysisMap[analyses[i].NewsID] = &analyses[i]
+	}
+
+	// Load impacts to map news to tickers.
+	tickerSet := make(map[string]bool, len(tickers))
+	for _, t := range tickers {
+		tickerSet[t] = true
+	}
+
+	// For each news item, check if it has impacts on our tickers.
+	// We query impacts in bulk.
+	rows, err := s.newsRepo.QueryImpactsByTickers(ctx, tickers)
+	if err != nil {
+		s.log.Warn("could not load news impacts", "error", err)
+		return
+	}
+
+	for _, row := range rows {
+		a, ok := analysisMap[row.NewsID]
+		if !ok {
+			continue
+		}
+		// Find the news to get its timestamp.
+		var newsTime int64
+		for _, n := range news {
+			if n.ID == row.NewsID {
+				newsTime = n.PublishedAt.Unix()
+				break
+			}
+		}
+		if newsTime == 0 {
+			continue
+		}
+
+		ev := newsEvent{
+			timestamp: newsTime,
+			sentiment: a.Sentiment,
+			urgency:   a.Urgency,
+			direction: int(row.Direction),
+			magnitude: row.Magnitude,
+		}
+		s.newsEvents[row.EntityName] = append(s.newsEvents[row.EntityName], ev)
+	}
+
+	total := 0
+	for ticker, events := range s.newsEvents {
+		total += len(events)
+		s.log.Debug("loaded news events for backtest", "ticker", ticker, "count", len(events))
+	}
+	s.log.Info("pre-loaded analyzed news for backtest", "total_events", total, "tickers_covered", len(s.newsEvents))
+}
+
+// makeNewsSignalFromLLM creates a signal function using real LLM-analyzed news.
+func (s *BacktestService) makeNewsSignalFromLLM(events []newsEvent) func(candles []domain.Candle, i int) (domain.SignalDirection, float64) {
+	return func(candles []domain.Candle, i int) (domain.SignalDirection, float64) {
+		if i < 5 {
+			return domain.SignalHold, 0
+		}
+
+		candleTime := candles[i].OpenTime
+		dayStart := candleTime - 86400 // 1 day window
+
+		// Find news events in the window [candleTime-24h, candleTime].
+		var totalScore float64
+		var count int
+		for _, ev := range events {
+			if ev.timestamp >= dayStart && ev.timestamp <= candleTime {
+				// Weight by urgency and impact magnitude.
+				urgencyWeight := float64(ev.urgency) / 5.0
+				score := ev.sentiment * urgencyWeight
+				if ev.direction != 0 {
+					score = float64(ev.direction) * ev.magnitude * urgencyWeight
+				}
+				totalScore += score
+				count++
+			}
+		}
+
+		if count == 0 {
+			return domain.SignalHold, 0
+		}
+
+		avgScore := totalScore / float64(count)
+		strength := clamp(absFloat(avgScore)*2, 0.3, 1.0)
+
+		if avgScore > 0.1 {
+			return domain.SignalBuy, strength
+		}
+		if avgScore < -0.1 {
+			return domain.SignalSell, strength
+		}
+		return domain.SignalHold, 0
+	}
+}
+
+// makeNewsSignalProxy creates a fallback signal function using momentum + volume.
+func (s *BacktestService) makeNewsSignalProxy() func(candles []domain.Candle, i int) (domain.SignalDirection, float64) {
+	return func(candles []domain.Candle, i int) (domain.SignalDirection, float64) {
+		if i < 20 {
+			return domain.SignalHold, 0
+		}
+		momentum := (candles[i].Close - candles[i-5].Close) / candles[i-5].Close
+		avgVol := 0.0
+		for j := i - 10; j < i; j++ {
+			avgVol += candles[j].Volume
+		}
+		avgVol /= 10
+		volSurge := 1.0
+		if avgVol > 0 {
+			volSurge = candles[i].Volume / avgVol
+		}
+		if momentum > 0.02 && volSurge > 1.5 {
+			return domain.SignalBuy, clamp(momentum*5, 0.3, 1.0)
+		}
+		if momentum < -0.02 && volSurge > 1.5 {
+			return domain.SignalSell, clamp(-momentum*5, 0.3, 1.0)
+		}
+		return domain.SignalHold, 0
+	}
+}
+
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
 	}
 	return v
 }

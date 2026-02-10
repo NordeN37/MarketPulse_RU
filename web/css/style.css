@@ -466,6 +466,22 @@ html, body {
     overflow-y: auto;
 }
 
+.mp-news-card__summary {
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(108, 99, 255, 0.06);
+    border-left: 3px solid var(--mp-accent);
+    border-radius: 0 6px 6px 0;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--mp-text-primary);
+}
+
+.mp-news-filters .form-label {
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+}
+
 .mp-news-card__link {
     font-size: 0.8rem;
     color: var(--mp-accent);

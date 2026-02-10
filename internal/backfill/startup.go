@@ -42,7 +42,7 @@ func DefaultStartupConfig(cfg *config.Config) StartupConfig {
 	return StartupConfig{
 		Tickers:         tickers,
 		CandleDaysBack:  365,
-		TelegramMaxMsgs: 500,
+		TelegramMaxMsgs: 1500,
 		InitialCash:     cash,
 		StopLossPct:     sl,
 		TakeProfitPct:   tp,
@@ -67,6 +67,7 @@ func StartupPipeline(
 	portfolioRepo := postgres.NewPortfolioRepo(db)
 	tradeRepo := postgres.NewTradeRepo(db)
 	signalRepo := postgres.NewSignalRepo(db)
+	newsRepo := postgres.NewNewsRepo(db)
 
 	// Check if backtests already exist.
 	existing, _ := portfolioRepo.CountByStrategy(ctx, "ta")
@@ -93,7 +94,6 @@ func StartupPipeline(
 	// ---- Step 2: Read Telegram history (optional) ----
 	if cfg.Telegram.APIID != 0 && cfg.Telegram.APIHash != "" && startupCfg.TelegramMaxMsgs > 0 {
 		log.Info("step 2/3: reading Telegram channel history...")
-		newsRepo := postgres.NewNewsRepo(db)
 		pipeline := collector.NewPipeline(newsRepo, nil, log) // nil cache = no dedup via Redis
 		histReader := telegram.NewHistoryReader(cfg.Telegram, pipeline.HandleNews, log)
 		if err := histReader.ReadHistory(ctx, startupCfg.TelegramMaxMsgs); err != nil {
@@ -108,7 +108,7 @@ func StartupPipeline(
 	btService := NewBacktestService(
 		candleBackfill, portfolioRepo, tradeRepo, signalRepo, log,
 		startupCfg.InitialCash, startupCfg.StopLossPct, startupCfg.TakeProfitPct,
-	)
+	).WithNewsRepo(newsRepo)
 
 	results, err := btService.RunAll(ctx, startupCfg.Tickers)
 	if err != nil {
