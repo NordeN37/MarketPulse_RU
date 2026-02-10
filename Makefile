@@ -32,6 +32,13 @@ run-trader:
 run-trader-skip:
 	go run ./cmd/trader -config configs/config.yaml -skip-backtest
 
+# Enrich TG news: scrape full articles for short Telegram posts with URLs
+enrich-tg:
+	go run ./cmd/tools/enrich -config configs/config.yaml
+
+enrich-tg-dry:
+	go run ./cmd/tools/enrich -config configs/config.yaml -dry-run
+
 # Infrastructure
 infra-up:
 	docker compose -f deployments/docker-compose.yml up -d
