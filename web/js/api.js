@@ -38,10 +38,39 @@
         return parts.length ? '?' + parts.join('&') : '';
     }
 
+    async function postJSON(url, body) {
+        try {
+            const resp = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            if (!resp.ok) {
+                let msg = resp.statusText;
+                try {
+                    const b = await resp.json();
+                    msg = b.error || b.message || msg;
+                } catch (_) {}
+                throw new Error(msg);
+            }
+            return await resp.json();
+        } catch (err) {
+            if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+                throw new Error('API недоступен — проверьте соединение');
+            }
+            throw err;
+        }
+    }
+
     window.API = {
         /** Raw GET returning parsed JSON */
         get: function (url) {
             return request(url);
+        },
+
+        /** Raw POST returning parsed JSON */
+        post: function (url, body) {
+            return postJSON(url, body);
         },
 
         /** Health check */

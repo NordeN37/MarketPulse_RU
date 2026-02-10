@@ -20,6 +20,7 @@ configs/config.local.yaml
 
 # Telegram session
 telegram_session*
+tg.session*
 
 # Environment
 .env
@@ -28,3 +29,4 @@ telegram_session*
 # OS
 .DS_Store
 Thumbs.db
+data/

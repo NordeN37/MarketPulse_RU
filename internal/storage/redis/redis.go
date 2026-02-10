@@ -39,6 +39,11 @@ func (c *Client) Close() error {
 	return c.rdb.Close()
 }
 
+// RDB returns the underlying go-redis client (for components that need direct access).
+func (c *Client) RDB() *redis.Client {
+	return c.rdb
+}
+
 // Dedup checks if a news item has been seen recently (returns true if duplicate).
 func (c *Client) Dedup(ctx context.Context, source, externalID string, window time.Duration) (bool, error) {
 	key := fmt.Sprintf("dedup:%s:%s", source, externalID)

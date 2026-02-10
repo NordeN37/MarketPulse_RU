@@ -69,15 +69,16 @@ func main() {
 
 	// Start Telegram userbot (MTProto) for channel monitoring
 	if cfg.Telegram.APIID != 0 && cfg.Telegram.APIHash != "" {
+		authBridge := telegram.NewAuthBridge(cache.RDB(), cfg.Telegram.Phone, log)
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			userbot := telegram.NewUserbot(cfg.Telegram, pipeline.HandleNews, log)
+			userbot := telegram.NewUserbot(cfg.Telegram, pipeline.HandleNews, log).WithAuthBridge(authBridge)
 			if err := userbot.Run(ctx); err != nil {
 				log.Error("telegram userbot error", "error", err)
 			}
 		}()
-		log.Info("telegram userbot (MTProto) started")
+		log.Info("telegram userbot (MTProto) started — auth code via admin panel if needed")
 	} else {
 		log.Warn("telegram MTProto not configured (set api_id, api_hash, phone), skipping channel monitoring")
 	}

@@ -20,7 +20,8 @@
         { path: '/stocks/:ticker',  component: window.PageStockDetail, meta: { title: 'Детали акции' } },
         { path: '/portfolios',      component: window.PagePortfolios,  meta: { title: 'Портфели' } },
         { path: '/signals',         component: window.PageSignals,     meta: { title: 'Сигналы' } },
-        { path: '/news',            component: window.PageNews,        meta: { title: 'Новости' } }
+        { path: '/news',            component: window.PageNews,        meta: { title: 'Новости' } },
+        { path: '/settings',        component: window.PageSettings,    meta: { title: 'Настройки' } }
     ];
 
     var router = createRouter({
@@ -46,7 +47,8 @@
                 { path: '/stocks',     label: 'Акции',      icon: 'bi-bar-chart-line' },
                 { path: '/portfolios', label: 'Портфели',   icon: 'bi-briefcase' },
                 { path: '/signals',    label: 'Сигналы',    icon: 'bi-lightning-charge' },
-                { path: '/news',       label: 'Новости',    icon: 'bi-newspaper' }
+                { path: '/news',       label: 'Новости',    icon: 'bi-newspaper' },
+                { path: '/settings',   label: 'Настройки',  icon: 'bi-gear' }
             ];
 
             function isActive(path) {

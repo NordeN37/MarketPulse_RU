@@ -55,6 +55,11 @@ func DefaultStartupConfig(cfg *config.Config) StartupConfig {
 // 2. Read Telegram channel history (optional, requires MTProto credentials)
 // 3. Run backtests for all 3 strategies
 // 4. Save equity curves and signals to DB
+// StartupOpts holds optional dependencies for the startup pipeline.
+type StartupOpts struct {
+	AuthBridge *telegram.AuthBridge
+}
+
 func StartupPipeline(
 	ctx context.Context,
 	cfg *config.Config,
@@ -62,7 +67,13 @@ func StartupPipeline(
 	db *postgres.DB,
 	moexClient *moex.Client,
 	log *slog.Logger,
+	opts ...StartupOpts,
 ) error {
+	var opt StartupOpts
+	if len(opts) > 0 {
+		opt = opts[0]
+	}
+	_ = opt
 	candleRepo := postgres.NewCandleRepo(db)
 	portfolioRepo := postgres.NewPortfolioRepo(db)
 	tradeRepo := postgres.NewTradeRepo(db)
@@ -96,6 +107,9 @@ func StartupPipeline(
 		log.Info("step 2/3: reading Telegram channel history...")
 		pipeline := collector.NewPipeline(newsRepo, nil, log) // nil cache = no dedup via Redis
 		histReader := telegram.NewHistoryReader(cfg.Telegram, pipeline.HandleNews, log)
+		if opt.AuthBridge != nil {
+			histReader.WithAuthBridge(opt.AuthBridge)
+		}
 		if err := histReader.ReadHistory(ctx, startupCfg.TelegramMaxMsgs); err != nil {
 			log.Warn("telegram history reading failed (continuing without)", "error", err)
 		}

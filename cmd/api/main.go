@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NordeN37/MarketPulse_RU/internal/collector/telegram"
 	"github.com/NordeN37/MarketPulse_RU/internal/config"
 	"github.com/NordeN37/MarketPulse_RU/internal/domain"
 	"github.com/NordeN37/MarketPulse_RU/internal/market/moex"
@@ -434,6 +435,80 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, trades)
+	})
+
+	// =====================================================
+	// Admin: Telegram auth management
+	// =====================================================
+	var authBridge *telegram.AuthBridge
+	if cfg.Telegram.Phone != "" {
+		authBridge = telegram.NewAuthBridge(cache.RDB(), cfg.Telegram.Phone, log)
+	}
+
+	mux.HandleFunc("GET /api/admin/telegram-status", func(w http.ResponseWriter, r *http.Request) {
+		if authBridge == nil {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"state":     "not_configured",
+				"message":   "Telegram MTProto не настроен (нет phone)",
+				"has_session": false,
+			})
+			return
+		}
+		state := authBridge.State(r.Context())
+		resp := map[string]any{
+			"state": string(state),
+		}
+		if state == telegram.AuthStateError {
+			resp["error"] = authBridge.LastError(r.Context())
+		}
+		if state == telegram.AuthStatePendingCode {
+			resp["message"] = "Введите код авторизации Telegram"
+		}
+		if state == telegram.AuthStatePendingPassword {
+			resp["message"] = "Введите пароль двухфакторной авторизации"
+		}
+		if state == telegram.AuthStateAuthenticated {
+			resp["message"] = "Telegram авторизован"
+		}
+		writeJSON(w, http.StatusOK, resp)
+	})
+
+	mux.HandleFunc("POST /api/admin/telegram-code", func(w http.ResponseWriter, r *http.Request) {
+		if authBridge == nil {
+			writeError(w, http.StatusBadRequest, "Telegram не настроен")
+			return
+		}
+		var body struct {
+			Code string `json:"code"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Code == "" {
+			writeError(w, http.StatusBadRequest, "укажите code в теле запроса")
+			return
+		}
+		if err := authBridge.SubmitCode(r.Context(), body.Code); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "code submitted"})
+	})
+
+	mux.HandleFunc("POST /api/admin/telegram-password", func(w http.ResponseWriter, r *http.Request) {
+		if authBridge == nil {
+			writeError(w, http.StatusBadRequest, "Telegram не настроен")
+			return
+		}
+		var body struct {
+			Password string `json:"password"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Password == "" {
+			writeError(w, http.StatusBadRequest, "укажите password в теле запроса")
+			return
+		}
+		if err := authBridge.SubmitPassword(r.Context(), body.Password); err != nil {
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "password submitted"})
 	})
 
 	// =====================================================

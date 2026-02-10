@@ -16,18 +16,33 @@ import (
 
 // HistoryReader reads historical messages from Telegram channels via MTProto.
 type HistoryReader struct {
-	cfg     config.TelegramConfig
-	handler MessageHandler
-	log     *slog.Logger
+	cfg        config.TelegramConfig
+	handler    MessageHandler
+	log        *slog.Logger
+	authBridge *AuthBridge
+	sessPath   string
 }
 
 // NewHistoryReader creates a reader for fetching channel history.
 func NewHistoryReader(cfg config.TelegramConfig, handler MessageHandler, log *slog.Logger) *HistoryReader {
 	return &HistoryReader{
-		cfg:     cfg,
-		handler: handler,
-		log:     log,
+		cfg:      cfg,
+		handler:  handler,
+		log:      log,
+		sessPath: "data/tg.session",
 	}
+}
+
+// WithAuthBridge sets a shared AuthBridge for web-based auth code input.
+func (h *HistoryReader) WithAuthBridge(ab *AuthBridge) *HistoryReader {
+	h.authBridge = ab
+	return h
+}
+
+// WithSessionPath overrides the default session file path.
+func (h *HistoryReader) WithSessionPath(path string) *HistoryReader {
+	h.sessPath = path
+	return h
 }
 
 // ReadHistory connects to Telegram, reads message history from all configured channels,
@@ -41,18 +56,30 @@ func (h *HistoryReader) ReadHistory(ctx context.Context, maxMessages int) error 
 	h.log.Info("starting telegram history reader",
 		"channels", h.cfg.Channels,
 		"max_per_channel", maxMessages,
+		"session_path", h.sessPath,
 	)
 
-	client := tgclient.NewTGClient(int32(h.cfg.APIID), h.cfg.APIHash, &slogHandler{log: h.log})
+	client := newClientWithSession(int32(h.cfg.APIID), h.cfg.APIHash, h.sessPath, h.log)
 
 	if err := client.InitAndConnect(); err != nil {
 		return fmt.Errorf("connecting to telegram: %w", err)
 	}
 	defer client.Disconnect()
 
-	authData := &phoneAuth{phone: h.cfg.Phone, log: h.log}
+	var authData mtproto.AuthDataProvider
+	if h.authBridge != nil {
+		authData = h.authBridge
+	} else {
+		authData = &phoneAuth{phone: h.cfg.Phone, log: h.log}
+	}
 	if err := client.AuthAndInitEvents(authData); err != nil {
+		if h.authBridge != nil {
+			h.authBridge.SetError(err.Error())
+		}
 		return fmt.Errorf("authenticating: %w", err)
+	}
+	if h.authBridge != nil {
+		h.authBridge.SetAuthenticated()
 	}
 
 	h.log.Info("telegram history reader authenticated")

@@ -662,3 +662,40 @@ html, body {
 .mp-search-input::placeholder {
     color: var(--mp-text-muted);
 }
+
+/* ============================================================
+   Settings page
+   ============================================================ */
+.mp-settings-card {
+    background-color: var(--mp-bg-card);
+    border: 1px solid var(--mp-border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.mp-settings-card__header {
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border-bottom: 1px solid var(--mp-border);
+    background-color: var(--mp-bg-tertiary);
+}
+
+.mp-settings-card__body {
+    padding: 1rem;
+}
+
+.mp-status-dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.mp-auth-form {
+    padding: 0.75rem;
+    border: 1px solid var(--mp-border-light);
+    border-radius: 6px;
+    background: var(--mp-bg-tertiary);
+}

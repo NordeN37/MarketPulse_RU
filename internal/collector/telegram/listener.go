@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,9 +25,11 @@ type MessageHandler func(ctx context.Context, news *domain.News) error
 // This allows reading public channels without being added as admin.
 // Requires api_id/api_hash from https://my.telegram.org and phone number.
 type Userbot struct {
-	cfg     config.TelegramConfig
-	handler MessageHandler
-	log     *slog.Logger
+	cfg        config.TelegramConfig
+	handler    MessageHandler
+	log        *slog.Logger
+	authBridge *AuthBridge
+	sessPath   string
 	// resolved channel IDs for filtering updates
 	channelIDs map[int64]string // channelID -> username
 }
@@ -37,7 +41,20 @@ func NewUserbot(cfg config.TelegramConfig, handler MessageHandler, log *slog.Log
 		handler:    handler,
 		log:        log,
 		channelIDs: make(map[int64]string),
+		sessPath:   "data/tg.session",
 	}
+}
+
+// WithAuthBridge sets a shared AuthBridge for web-based auth code input.
+func (u *Userbot) WithAuthBridge(ab *AuthBridge) *Userbot {
+	u.authBridge = ab
+	return u
+}
+
+// WithSessionPath overrides the default session file path.
+func (u *Userbot) WithSessionPath(path string) *Userbot {
+	u.sessPath = path
+	return u
 }
 
 // slogHandler adapts slog.Logger to tgclient's mtproto.LogHandler interface.
@@ -73,9 +90,10 @@ func (u *Userbot) Run(ctx context.Context) error {
 	u.log.Info("starting telegram userbot (MTProto)",
 		"api_id", u.cfg.APIID,
 		"channels", u.cfg.Channels,
+		"session_path", u.sessPath,
 	)
 
-	client := tgclient.NewTGClient(int32(u.cfg.APIID), u.cfg.APIHash, &slogHandler{log: u.log})
+	client := newClientWithSession(int32(u.cfg.APIID), u.cfg.APIHash, u.sessPath, u.log)
 
 	// Set update handler for incoming channel messages
 	client.SetUpdateHandler(func(update mtproto.TL) {
@@ -88,12 +106,23 @@ func (u *Userbot) Run(ctx context.Context) error {
 	}
 	defer client.Disconnect()
 
-	// Authenticate using phone number
-	authData := &phoneAuth{phone: u.cfg.Phone, log: u.log}
+	// Use AuthBridge if available, otherwise fall back to stdin-based auth.
+	var authData mtproto.AuthDataProvider
+	if u.authBridge != nil {
+		authData = u.authBridge
+	} else {
+		authData = &phoneAuth{phone: u.cfg.Phone, log: u.log}
+	}
 	if err := client.AuthAndInitEvents(authData); err != nil {
+		if u.authBridge != nil {
+			u.authBridge.SetError(err.Error())
+		}
 		return fmt.Errorf("authenticating: %w", err)
 	}
 
+	if u.authBridge != nil {
+		u.authBridge.SetAuthenticated()
+	}
 	u.log.Info("telegram userbot authenticated")
 
 	// Resolve channel usernames to IDs and join them
@@ -231,7 +260,29 @@ func (u *Userbot) handleChannelMessage(ctx context.Context, upd mtproto.TL_updat
 	}
 }
 
-// phoneAuth provides phone-based authentication data for MTProto.
+// newClientWithSession creates a TGClient with a stable session file path.
+// Unlike the default NewTGClient (which uses the executable dir),
+// this stores the session in a predictable location (e.g. data/tg.session).
+func newClientWithSession(appID int32, appHash, sessPath string, log *slog.Logger) *tgclient.TGClient {
+	// Ensure the parent directory exists.
+	if dir := filepath.Dir(sessPath); dir != "." && dir != "" {
+		os.MkdirAll(dir, 0o755)
+	}
+	sessStore := &mtproto.SessFileStore{FPath: sessPath}
+	cfg := &mtproto.AppConfig{
+		AppID:          appID,
+		AppHash:        appHash,
+		AppVersion:     "0.0.1",
+		DeviceModel:    "MarketPulse_RU",
+		SystemVersion:  "linux",
+		SystemLangCode: "ru",
+		LangPack:       "",
+		LangCode:       "ru",
+	}
+	return tgclient.NewTGClientExt(cfg, sessStore, &slogHandler{log: log}, nil)
+}
+
+// phoneAuth provides phone-based authentication data for MTProto (stdin fallback).
 type phoneAuth struct {
 	phone string
 	log   *slog.Logger
@@ -242,8 +293,6 @@ func (a *phoneAuth) PhoneNumber() (string, error) {
 }
 
 func (a *phoneAuth) Code() (string, error) {
-	// In production, this should read from stdin or a callback.
-	// For automated operation, the session file is reused after first auth.
 	a.log.Warn("telegram auth code requested — enter code via stdin")
 	var code string
 	fmt.Print("Enter Telegram auth code: ")
