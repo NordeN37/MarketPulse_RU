@@ -19,6 +19,13 @@
             var submitting   = ref(false);
             var pollTimer    = null;
 
+            // --- Sources / Re-read ---
+            var sources        = ref([]);
+            var sourcesLoading = ref(false);
+            var sourcesError   = ref('');
+            var rereadingMap   = ref({});   // key -> true while in progress
+            var rereadResults  = ref({});   // key -> { ok: bool, msg: string }
+
             async function fetchTelegramStatus() {
                 try {
                     var data = await API.get('/api/admin/telegram-status');
@@ -81,8 +88,61 @@
                 return 'var(--mp-text-muted)';
             }
 
+            async function fetchSources() {
+                sourcesLoading.value = true;
+                sourcesError.value = '';
+                try {
+                    var data = await API.getSources();
+                    sources.value = Array.isArray(data) ? data : [];
+                } catch (err) {
+                    sourcesError.value = err.message || 'Не удалось загрузить источники';
+                    sources.value = [];
+                }
+                sourcesLoading.value = false;
+            }
+
+            function sourceKey(src) {
+                return src.type + ':' + src.channel;
+            }
+
+            async function triggerReread(src) {
+                var key = sourceKey(src);
+                rereadingMap.value[key] = true;
+                delete rereadResults.value[key];
+                // Force reactivity
+                rereadingMap.value = Object.assign({}, rereadingMap.value);
+                rereadResults.value = Object.assign({}, rereadResults.value);
+                try {
+                    var resp = await API.triggerReread(src.type, src.channel);
+                    rereadResults.value[key] = { ok: true, msg: resp.message || 'Готово' };
+                } catch (err) {
+                    rereadResults.value[key] = { ok: false, msg: err.message || 'Ошибка' };
+                }
+                delete rereadingMap.value[key];
+                rereadingMap.value = Object.assign({}, rereadingMap.value);
+                rereadResults.value = Object.assign({}, rereadResults.value);
+                // Clear result after 5 seconds
+                setTimeout(function () {
+                    delete rereadResults.value[key];
+                    rereadResults.value = Object.assign({}, rereadResults.value);
+                }, 5000);
+            }
+
+            function sourceTypeLabel(type) {
+                if (type === 'rss') return 'RSS';
+                if (type === 'telegram') return 'Telegram';
+                return type;
+            }
+
+            function sourceTypeIcon(type) {
+                if (type === 'rss') return 'bi-rss';
+                if (type === 'telegram') return 'bi-telegram';
+                return 'bi-globe';
+            }
+
             onMounted(function () {
                 fetchTelegramStatus();
+                fetchSources();
                 pollTimer = setInterval(fetchTelegramStatus, 3000);
             });
 
@@ -101,7 +161,17 @@
                 submitPassword: submitPassword,
                 stateLabel: stateLabel,
                 stateColor: stateColor,
-                fetchTelegramStatus: fetchTelegramStatus
+                fetchTelegramStatus: fetchTelegramStatus,
+                sources: sources,
+                sourcesLoading: sourcesLoading,
+                sourcesError: sourcesError,
+                rereadingMap: rereadingMap,
+                rereadResults: rereadResults,
+                fetchSources: fetchSources,
+                sourceKey: sourceKey,
+                triggerReread: triggerReread,
+                sourceTypeLabel: sourceTypeLabel,
+                sourceTypeIcon: sourceTypeIcon
             };
         },
         template: `
@@ -207,6 +277,81 @@
                         <i class="bi bi-arrow-clockwise me-1"></i>Обновить статус
                     </button>
                 </div>
+            </div>
+        </div>
+
+        <!-- Sources / Re-read Section -->
+        <div class="mp-settings-card mt-3">
+            <div class="mp-settings-card__header d-flex align-items-center justify-content-between">
+                <span>
+                    <i class="bi bi-collection me-2"></i>
+                    Источники новостей
+                </span>
+                <button class="btn btn-sm btn-outline-secondary" @click="fetchSources" :disabled="sourcesLoading">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Обновить
+                </button>
+            </div>
+            <div class="mp-settings-card__body">
+                <div v-if="sourcesLoading && sources.length === 0" class="text-muted" style="font-size:0.85rem;">
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                    Загрузка источников...
+                </div>
+
+                <div v-if="sourcesError" class="alert alert-danger py-2 px-3 mb-2" style="font-size:0.85rem;">
+                    <i class="bi bi-exclamation-triangle me-1"></i>{{ sourcesError }}
+                </div>
+
+                <div v-if="sources.length > 0" class="table-responsive">
+                    <table class="mp-table" style="font-size:0.85rem;">
+                        <thead>
+                            <tr>
+                                <th>Тип</th>
+                                <th>Название</th>
+                                <th>Канал</th>
+                                <th class="text-end">Действие</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="src in sources" :key="sourceKey(src)">
+                                <td>
+                                    <i class="bi me-1" :class="sourceTypeIcon(src.type)"></i>
+                                    {{ sourceTypeLabel(src.type) }}
+                                </td>
+                                <td>{{ src.name }}</td>
+                                <td><code style="font-size:0.8rem;">{{ src.channel }}</code></td>
+                                <td class="text-end" style="white-space:nowrap;">
+                                    <button class="btn btn-sm btn-outline-primary"
+                                            @click="triggerReread(src)"
+                                            :disabled="rereadingMap[sourceKey(src)]">
+                                        <span v-if="rereadingMap[sourceKey(src)]">
+                                            <span class="spinner-border spinner-border-sm me-1"></span>
+                                            Чтение...
+                                        </span>
+                                        <span v-else>
+                                            <i class="bi bi-arrow-repeat me-1"></i>Перечитать
+                                        </span>
+                                    </button>
+                                    <span v-if="rereadResults[sourceKey(src)]"
+                                          class="ms-2"
+                                          :style="{ color: rereadResults[sourceKey(src)].ok ? 'var(--mp-green)' : 'var(--mp-red)', fontSize: '0.8rem' }">
+                                        <i class="bi" :class="rereadResults[sourceKey(src)].ok ? 'bi-check-circle' : 'bi-x-circle'"></i>
+                                        {{ rereadResults[sourceKey(src)].msg }}
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div v-if="!sourcesLoading && sources.length === 0 && !sourcesError"
+                     class="text-muted" style="font-size:0.85rem;">
+                    Источники не найдены.
+                </div>
+
+                <p class="text-muted mt-2 mb-0" style="font-size:0.78rem;">
+                    <i class="bi bi-shield-check me-1"></i>
+                    Перечитывание безопасно — дубликаты отсеиваются автоматически (Redis + DB).
+                </p>
             </div>
         </div>
 

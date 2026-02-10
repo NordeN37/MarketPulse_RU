@@ -132,3 +132,30 @@ func (c *Client) SubscribeAlerts(ctx context.Context) (<-chan int64, error) {
 func (c *Client) QueueLen(ctx context.Context) (int64, error) {
 	return c.rdb.LLen(ctx, "queue:news:analyze").Result()
 }
+
+// PublishReread sends a reread command to the collector for a specific source/channel.
+func (c *Client) PublishReread(ctx context.Context, sourceType, channel string) error {
+	payload := sourceType + ":" + channel
+	return c.rdb.Publish(ctx, "collector:reread", payload).Err()
+}
+
+// SubscribeReread returns a channel that receives reread commands (format: "source_type:channel_name").
+func (c *Client) SubscribeReread(ctx context.Context) (<-chan string, error) {
+	pubsub := c.rdb.Subscribe(ctx, "collector:reread")
+	ch := make(chan string, 10)
+
+	go func() {
+		defer close(ch)
+		defer pubsub.Close()
+
+		for {
+			msg, err := pubsub.ReceiveMessage(ctx)
+			if err != nil {
+				return
+			}
+			ch <- msg.Payload
+		}
+	}()
+
+	return ch, nil
+}

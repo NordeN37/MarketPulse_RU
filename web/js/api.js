@@ -179,6 +179,16 @@
         /** All cached quotes (REST fallback) */
         getAllQuotes: function () {
             return request('/api/quotes');
+        },
+
+        /** Admin: list all news sources (RSS + Telegram) */
+        getSources: function () {
+            return request('/api/admin/sources');
+        },
+
+        /** Admin: trigger re-read for a specific source */
+        triggerReread: function (sourceType, channel) {
+            return postJSON('/api/admin/reread', { type: sourceType, channel: channel });
         }
     };
 

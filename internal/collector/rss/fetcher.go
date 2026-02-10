@@ -111,6 +111,78 @@ func NewFetcher(feeds []Feed, handler MessageHandler, interval time.Duration, lo
 	}
 }
 
+// FetchOneFeed fetches a single RSS feed and passes items through the handler.
+// Returns (new items count, total items, error).
+// Designed for one-shot admin re-reads — deduplication is handled by the handler/pipeline.
+func FetchOneFeed(ctx context.Context, feed Feed, handler MessageHandler, log *slog.Logger) (int, int, error) {
+	httpClient := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
+
+	parser := gofeed.NewParser()
+	parser.Client = httpClient
+
+	parsedFeed, err := parser.ParseURLWithContext(feed.URL, ctx)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing feed %s: %w", feed.Name, err)
+	}
+
+	var newCount int
+	for _, item := range parsedFeed.Items {
+		if ctx.Err() != nil {
+			break
+		}
+
+		publishedAt := time.Now()
+		if item.PublishedParsed != nil {
+			publishedAt = *item.PublishedParsed
+		} else if item.UpdatedParsed != nil {
+			publishedAt = *item.UpdatedParsed
+		}
+
+		news := &domain.News{
+			ExternalID:    item.GUID,
+			Source:        domain.SourceRSS,
+			SourceChannel: feed.Channel,
+			Title:         item.Title,
+			Content:       item.Description,
+			URL:           item.Link,
+			PublishedAt:   publishedAt,
+			CollectedAt:   time.Now(),
+		}
+
+		if err := handler(ctx, news); err != nil {
+			log.Warn("handler error during reread",
+				"feed", feed.Name,
+				"guid", item.GUID,
+				"error", err,
+			)
+		}
+		newCount++ // actual new vs dup is tracked by pipeline
+	}
+
+	return newCount, len(parsedFeed.Items), nil
+}
+
+// FindFeedByChannel finds a feed by its channel name from DefaultFeeds.
+func FindFeedByChannel(channel string) (Feed, bool) {
+	for _, f := range DefaultFeeds() {
+		if f.Channel == channel {
+			return f, true
+		}
+	}
+	return Feed{}, false
+}
+
 // Run starts polling feeds periodically. Blocks until context is cancelled.
 func (f *Fetcher) Run(ctx context.Context) error {
 	f.log.Info("starting RSS fetcher", "feeds", len(f.feeds), "interval", f.interval)

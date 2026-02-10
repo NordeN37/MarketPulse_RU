@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/NordeN37/MarketPulse_RU/internal/collector"
+	"github.com/NordeN37/MarketPulse_RU/internal/collector/rss"
 	"github.com/NordeN37/MarketPulse_RU/internal/collector/telegram"
 	"github.com/NordeN37/MarketPulse_RU/internal/config"
 	"github.com/NordeN37/MarketPulse_RU/internal/domain"
@@ -569,6 +572,97 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "password submitted"})
+	})
+
+	// =====================================================
+	// Admin: Source management & re-read
+	// =====================================================
+
+	// Pipeline for RSS re-reads (dedup handles duplicates)
+	rereadPipeline := collector.NewPipeline(newsRepo, cache, log)
+
+	// List all sources (RSS feeds + Telegram channels)
+	mux.HandleFunc("GET /api/admin/sources", func(w http.ResponseWriter, r *http.Request) {
+		var sources []map[string]any
+
+		// RSS feeds
+		for _, f := range rss.DefaultFeeds() {
+			sources = append(sources, map[string]any{
+				"type":    "rss",
+				"name":    f.Name,
+				"channel": f.Channel,
+				"url":     f.URL,
+			})
+		}
+
+		// Telegram channels
+		for _, ch := range cfg.Telegram.Channels {
+			sources = append(sources, map[string]any{
+				"type":    "telegram",
+				"name":    "@" + ch,
+				"channel": ch,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, sources)
+	})
+
+	// Trigger re-read of a source (RSS: direct fetch, Telegram: via Redis to collector)
+	mux.HandleFunc("POST /api/admin/reread", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Type    string `json:"type"`    // "rss" or "telegram"
+			Channel string `json:"channel"` // channel name
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if body.Channel == "" {
+			writeError(w, http.StatusBadRequest, "channel is required")
+			return
+		}
+
+		switch body.Type {
+		case "rss":
+			feed, found := rss.FindFeedByChannel(body.Channel)
+			if !found {
+				writeError(w, http.StatusNotFound, "RSS feed not found: "+body.Channel)
+				return
+			}
+
+			processed, total, err := rss.FetchOneFeed(r.Context(), feed, rereadPipeline.HandleNews, log)
+			if err != nil {
+				writeError(w, http.StatusBadGateway, "fetch failed: "+err.Error())
+				return
+			}
+			log.Info("admin re-read RSS completed",
+				"feed", feed.Name,
+				"total_items", total,
+				"processed", processed,
+			)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":    "ok",
+				"feed":      feed.Name,
+				"total":     total,
+				"processed": processed,
+				"message":   fmt.Sprintf("Перечитано %d элементов из %s (дубли отсеяны)", total, feed.Name),
+			})
+
+		case "telegram":
+			// Send command to collector via Redis pub/sub
+			if err := cache.PublishReread(r.Context(), "telegram", body.Channel); err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to send reread command: "+err.Error())
+				return
+			}
+			log.Info("admin re-read Telegram command sent", "channel", body.Channel)
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status":  "ok",
+				"message": fmt.Sprintf("Команда на перечитку @%s отправлена коллектору", body.Channel),
+			})
+
+		default:
+			writeError(w, http.StatusBadRequest, "type must be 'rss' or 'telegram'")
+		}
 	})
 
 	// =====================================================
