@@ -37,14 +37,45 @@ func (r *HeatRepo) Upsert(ctx context.Context, hs *domain.HeatScore) error {
 }
 
 // GetTopHeat returns the entities with highest absolute heat scores.
+// JOINs with companies/commodities to resolve entity names.
 func (r *HeatRepo) GetTopHeat(ctx context.Context, entityType domain.EntityType, timeframe string, date time.Time, limit int) ([]domain.HeatScore, error) {
-	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, entity_type, entity_id, date, timeframe, score, score_change,
-		       positive_signals, negative_signals, top_news_ids, updated_at
-		FROM heat_scores
-		WHERE entity_type = $1 AND timeframe = $2 AND date = $3
-		ORDER BY ABS(score) DESC
-		LIMIT $4`, entityType, timeframe, date, limit)
+	var query string
+	switch entityType {
+	case domain.EntityCompany:
+		query = `
+			SELECT hs.id, hs.entity_type, hs.entity_id,
+			       COALESCE(c.ticker, '') AS entity_name,
+			       hs.date, hs.timeframe, hs.score, hs.score_change,
+			       hs.positive_signals, hs.negative_signals, hs.top_news_ids, hs.updated_at
+			FROM heat_scores hs
+			LEFT JOIN companies c ON c.id = hs.entity_id
+			WHERE hs.entity_type = $1 AND hs.timeframe = $2 AND hs.date = $3
+			ORDER BY ABS(hs.score) DESC
+			LIMIT $4`
+	case domain.EntityCommodity:
+		query = `
+			SELECT hs.id, hs.entity_type, hs.entity_id,
+			       COALESCE(cm.code, '') AS entity_name,
+			       hs.date, hs.timeframe, hs.score, hs.score_change,
+			       hs.positive_signals, hs.negative_signals, hs.top_news_ids, hs.updated_at
+			FROM heat_scores hs
+			LEFT JOIN commodities cm ON cm.id = hs.entity_id
+			WHERE hs.entity_type = $1 AND hs.timeframe = $2 AND hs.date = $3
+			ORDER BY ABS(hs.score) DESC
+			LIMIT $4`
+	default:
+		query = `
+			SELECT hs.id, hs.entity_type, hs.entity_id,
+			       '' AS entity_name,
+			       hs.date, hs.timeframe, hs.score, hs.score_change,
+			       hs.positive_signals, hs.negative_signals, hs.top_news_ids, hs.updated_at
+			FROM heat_scores hs
+			WHERE hs.entity_type = $1 AND hs.timeframe = $2 AND hs.date = $3
+			ORDER BY ABS(hs.score) DESC
+			LIMIT $4`
+	}
+
+	rows, err := r.db.Pool.Query(ctx, query, entityType, timeframe, date, limit)
 	if err != nil {
 		return nil, fmt.Errorf("querying top heat: %w", err)
 	}
@@ -54,7 +85,8 @@ func (r *HeatRepo) GetTopHeat(ctx context.Context, entityType domain.EntityType,
 	for rows.Next() {
 		var hs domain.HeatScore
 		if err := rows.Scan(
-			&hs.ID, &hs.EntityType, &hs.EntityID, &hs.Date, &hs.Timeframe,
+			&hs.ID, &hs.EntityType, &hs.EntityID, &hs.EntityName,
+			&hs.Date, &hs.Timeframe,
 			&hs.Score, &hs.ScoreChange, &hs.PositiveSignals, &hs.NegativeSignals,
 			&hs.TopNewsIDs, &hs.UpdatedAt,
 		); err != nil {
@@ -68,7 +100,7 @@ func (r *HeatRepo) GetTopHeat(ctx context.Context, entityType domain.EntityType,
 // GetEntityHistory returns heat score history for a specific entity.
 func (r *HeatRepo) GetEntityHistory(ctx context.Context, entityType domain.EntityType, entityID int64, timeframe string, days int) ([]domain.HeatScore, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, entity_type, entity_id, date, timeframe, score, score_change,
+		SELECT id, entity_type, entity_id, '' AS entity_name, date, timeframe, score, score_change,
 		       positive_signals, negative_signals, top_news_ids, updated_at
 		FROM heat_scores
 		WHERE entity_type = $1 AND entity_id = $2 AND timeframe = $3
@@ -83,7 +115,7 @@ func (r *HeatRepo) GetEntityHistory(ctx context.Context, entityType domain.Entit
 	for rows.Next() {
 		var hs domain.HeatScore
 		if err := rows.Scan(
-			&hs.ID, &hs.EntityType, &hs.EntityID, &hs.Date, &hs.Timeframe,
+			&hs.ID, &hs.EntityType, &hs.EntityID, &hs.EntityName, &hs.Date, &hs.Timeframe,
 			&hs.Score, &hs.ScoreChange, &hs.PositiveSignals, &hs.NegativeSignals,
 			&hs.TopNewsIDs, &hs.UpdatedAt,
 		); err != nil {

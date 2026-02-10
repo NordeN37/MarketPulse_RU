@@ -77,6 +77,13 @@ func main() {
 	tradeRepo := postgres.NewTradeRepo(db)
 	moexClient := moex.NewClient(cfg.MOEX, log)
 
+	// Authenticate MOEX Passport for order book access (optional)
+	if cfg.MOEX.PassportLogin != "" {
+		if err := moexClient.Authenticate(ctx, cfg.MOEX.PassportLogin, cfg.MOEX.PassportPassword); err != nil {
+			log.Warn("MOEX passport auth failed — order book unavailable", "error", err)
+		}
+	}
+
 	// Start SSE quote broadcaster (polls MOEX every 10s, pushes via SSE)
 	quoteBroadcaster := stream.NewQuoteBroadcaster(moexClient, companyRepo, 10*time.Second, log)
 	go quoteBroadcaster.Run(ctx)
@@ -316,6 +323,23 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, candles)
+	})
+
+	// =====================================================
+	// Order book (стакан) + anomaly detection
+	// =====================================================
+	mux.HandleFunc("GET /api/orderbook/{ticker}", func(w http.ResponseWriter, r *http.Request) {
+		ticker := r.PathValue("ticker")
+		ob, err := moexClient.GetOrderBook(r.Context(), ticker)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		anomalies := moex.DetectAnomalies(ob)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"orderbook": ob,
+			"anomalies": anomalies,
+		})
 	})
 
 	// =====================================================

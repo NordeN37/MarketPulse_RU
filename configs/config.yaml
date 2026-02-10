@@ -129,6 +129,9 @@ moex:
   base_url: "https://iss.moex.com/iss"
   request_timeout: "10s"
   rate_limit_per_second: 5
+  # Passport credentials for order book access (register at https://passport.moex.com)
+  passport_login: "${MOEX_PASSPORT_LOGIN}"
+  passport_password: "${MOEX_PASSPORT_PASSWORD}"
 
 # =====================================================
 # Monitoring — full market universe

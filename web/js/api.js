@@ -194,6 +194,11 @@
         /** Admin: get LLM usage stats */
         getLLMStats: function () {
             return request('/api/admin/llm-stats');
+        },
+
+        /** Order book (стакан) + anomaly detection */
+        getOrderBook: function (ticker) {
+            return request('/api/orderbook/' + encodeURIComponent(ticker));
         }
     };
 

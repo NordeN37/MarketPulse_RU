@@ -80,21 +80,71 @@
         });
     }
 
+    function computeReturns(curve) {
+        if (!curve || curve.length < 2) return { monthlyReturn: null, annualReturn: null };
+        var lastPoint = curve[curve.length - 1];
+        var lastVal = lastPoint.value;
+        var lastTime = lastPoint.time;
+        var month30 = lastTime - 30 * 86400;
+        var year365 = lastTime - 365 * 86400;
+        var monthlyReturn = null;
+        var annualReturn = null;
+        // Find closest point to 30 days ago
+        for (var i = curve.length - 1; i >= 0; i--) {
+            if (curve[i].time <= month30) {
+                monthlyReturn = ((lastVal - curve[i].value) / curve[i].value) * 100;
+                break;
+            }
+        }
+        // If no point 30 days ago, use first point
+        if (monthlyReturn === null && curve.length >= 2) {
+            var first = curve[0];
+            var daysDiff = (lastTime - first.time) / 86400;
+            if (daysDiff > 0 && daysDiff <= 60) {
+                monthlyReturn = ((lastVal - first.value) / first.value) * 100 * (30 / daysDiff);
+            }
+        }
+        // Find closest point to 365 days ago
+        for (var i = curve.length - 1; i >= 0; i--) {
+            if (curve[i].time <= year365) {
+                annualReturn = ((lastVal - curve[i].value) / curve[i].value) * 100;
+                break;
+            }
+        }
+        // If no point 365 days ago, annualize from available data
+        if (annualReturn === null && curve.length >= 2) {
+            var first = curve[0];
+            var daysDiff = (lastTime - first.time) / 86400;
+            if (daysDiff > 30) {
+                var totalReturn = (lastVal - first.value) / first.value;
+                annualReturn = (Math.pow(1 + totalReturn, 365 / daysDiff) - 1) * 100;
+            }
+        }
+        return {
+            monthlyReturn: monthlyReturn !== null ? Math.round(monthlyReturn * 100) / 100 : null,
+            annualReturn: annualReturn !== null ? Math.round(annualReturn * 100) / 100 : null
+        };
+    }
+
     function snapshotsToStats(snapshots) {
         if (!snapshots || snapshots.length === 0) {
-            return { totalPnl: 0, winRate: 0, maxDrawdown: 0, totalTrades: 0 };
+            return { totalPnl: 0, winRate: 0, maxDrawdown: 0, totalTrades: 0, monthlyReturn: null, annualReturn: null };
         }
         var last = snapshots[snapshots.length - 1];
+        var curve = snapshotsToChartData(snapshots);
+        var returns = computeReturns(curve);
         return {
             totalPnl: Math.round(last.total_pnl || 0),
             winRate: Math.round((last.win_rate || 0) * 100),
             maxDrawdown: Math.round((last.max_drawdown || 0) * 10000) / 100,
-            totalTrades: last.total_trades || 0
+            totalTrades: last.total_trades || 0,
+            monthlyReturn: returns.monthlyReturn,
+            annualReturn: returns.annualReturn
         };
     }
 
     function computeStatsFromCurve(curve) {
-        if (!curve || curve.length === 0) return { totalPnl: 0, winRate: 0, maxDrawdown: 0, totalTrades: 0 };
+        if (!curve || curve.length === 0) return { totalPnl: 0, winRate: 0, maxDrawdown: 0, totalTrades: 0, monthlyReturn: null, annualReturn: null };
         var lastVal = curve[curve.length - 1].value;
         var totalPnl = lastVal - INITIAL;
         var peak = INITIAL;
@@ -104,11 +154,14 @@
             var dd = (peak - curve[i].value) / peak;
             if (dd > maxDD) maxDD = dd;
         }
+        var returns = computeReturns(curve);
         return {
             totalPnl: Math.round(totalPnl),
             winRate: Math.round((0.45 + Math.random() * 0.2) * 100),
             maxDrawdown: Math.round(maxDD * 10000) / 100,
-            totalTrades: 20 + Math.floor(Math.random() * 40)
+            totalTrades: 20 + Math.floor(Math.random() * 40),
+            monthlyReturn: returns.monthlyReturn,
+            annualReturn: returns.annualReturn
         };
     }
 
@@ -273,6 +326,10 @@
                 if (v < 0) return 'text-down';
                 return 'text-flat';
             }
+            function fmtReturn(v) {
+                if (v === null || v === undefined) return '—';
+                return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
+            }
             function fmtDate(ts) {
                 return new Date(ts).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' });
             }
@@ -340,6 +397,7 @@
                 fmtMoney: fmtMoney,
                 fmtPrice: fmtPrice,
                 pnlClass: pnlClass,
+                fmtReturn: fmtReturn,
                 fmtDate: fmtDate,
                 PORTFOLIO_COLORS: PORTFOLIO_COLORS,
                 PORTFOLIO_LABELS: PORTFOLIO_LABELS
@@ -401,6 +459,18 @@
                                         {{ stats[type] ? stats[type].winRate : 0 }}%
                                     </div>
                                     <div class="mp-stat__label">Win Rate</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="mp-stat__value" style="font-size:1rem;" :class="pnlClass(stats[type] ? stats[type].monthlyReturn : 0)">
+                                        {{ stats[type] ? fmtReturn(stats[type].monthlyReturn) : '—' }}
+                                    </div>
+                                    <div class="mp-stat__label">За месяц</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="mp-stat__value" style="font-size:1rem;" :class="pnlClass(stats[type] ? stats[type].annualReturn : 0)">
+                                        {{ stats[type] ? fmtReturn(stats[type].annualReturn) : '—' }}
+                                    </div>
+                                    <div class="mp-stat__label">За год</div>
                                 </div>
                                 <div class="col-6">
                                     <div class="mp-stat__value text-down" style="font-size:1.1rem;">

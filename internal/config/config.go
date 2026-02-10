@@ -186,6 +186,9 @@ type MOEXConfig struct {
 	BaseURL            string `yaml:"base_url"`
 	RequestTimeout     string `yaml:"request_timeout"`
 	RateLimitPerSecond int    `yaml:"rate_limit_per_second"`
+	// Passport credentials for authenticated access (order book, etc.)
+	PassportLogin    string `yaml:"passport_login"`
+	PassportPassword string `yaml:"passport_password"`
 }
 
 func (m MOEXConfig) Timeout() time.Duration {

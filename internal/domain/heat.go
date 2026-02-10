@@ -7,6 +7,7 @@ type HeatScore struct {
 	ID              int64      `json:"id" db:"id"`
 	EntityType      EntityType `json:"entity_type" db:"entity_type"`
 	EntityID        int64      `json:"entity_id" db:"entity_id"`
+	EntityName      string     `json:"entity_name" db:"entity_name"`
 	Date            time.Time  `json:"date" db:"date"`
 	Timeframe       string     `json:"timeframe" db:"timeframe"` // "1d", "7d", "30d"
 	Score           float64    `json:"score" db:"score"`
