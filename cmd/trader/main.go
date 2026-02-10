@@ -130,6 +130,10 @@ func main() {
 		checkInterval = 5 * time.Minute
 	}
 
+	// Repositories for signal consumption and position persistence.
+	signalRepo := postgres.NewSignalRepo(db)
+	positionRepo := postgres.NewPositionRepo(db)
+
 	// Create engine.
 	eng := engine.NewEngine(engine.Config{
 		Mode:           domain.TradingMode(cfg.Trading.Mode),
@@ -140,6 +144,11 @@ func main() {
 		DryRun:         cfg.Trading.DryRun,
 		InitialCash:    cfg.Trading.InitialCash,
 	}, moexClient, log)
+
+	// Wire DB persistence: consume news signals from analyzer, persist positions.
+	eng.SetSignalReader(signalRepo)
+	eng.SetPositionWriter(positionRepo)
+	eng.RestorePositions(ctx)
 
 	log.Info("trader engine running",
 		"mode", cfg.Trading.Mode,

@@ -13,6 +13,19 @@ import (
 	"github.com/NordeN37/MarketPulse_RU/internal/trading/strategy"
 )
 
+// SignalReader reads pending signals from the database.
+type SignalReader interface {
+	GetPendingBySource(ctx context.Context, source string, limit int) ([]domain.Signal, error)
+	MarkExecuted(ctx context.Context, id int64) error
+}
+
+// PositionWriter persists positions to the database.
+type PositionWriter interface {
+	Insert(ctx context.Context, p *domain.Position) (int64, error)
+	Close(ctx context.Context, p *domain.Position) error
+	GetOpen(ctx context.Context) ([]domain.Position, error)
+}
+
 // Engine is the main trading engine orchestrating signals, risk, and execution.
 type Engine struct {
 	mode      domain.TradingMode
@@ -25,6 +38,10 @@ type Engine struct {
 	regime    *strategy.RegimeDetector
 	log       *slog.Logger
 
+	// Persistence.
+	signalReader   SignalReader
+	positionWriter PositionWriter
+
 	// State.
 	portfolio     *domain.Portfolio
 	openPositions []domain.Position
@@ -36,13 +53,13 @@ type Engine struct {
 
 // Config holds trading engine configuration.
 type Config struct {
-	Mode          domain.TradingMode
-	Tickers       []string
-	RiskConfig    domain.RiskConfig
+	Mode           domain.TradingMode
+	Tickers        []string
+	RiskConfig     domain.RiskConfig
 	StrategyConfig domain.StrategyConfig
-	CheckInterval time.Duration
-	DryRun        bool
-	InitialCash   float64
+	CheckInterval  time.Duration
+	DryRun         bool
+	InitialCash    float64
 }
 
 // NewEngine creates a new trading engine.
@@ -87,6 +104,31 @@ func NewEngine(cfg Config, moexClient *moex.Client, log *slog.Logger) *Engine {
 	return e
 }
 
+// SetSignalReader sets the signal reader for consuming DB signals.
+func (e *Engine) SetSignalReader(sr SignalReader) {
+	e.signalReader = sr
+}
+
+// SetPositionWriter sets the position writer for persistence.
+func (e *Engine) SetPositionWriter(pw PositionWriter) {
+	e.positionWriter = pw
+}
+
+// RestorePositions loads open positions from DB on startup.
+func (e *Engine) RestorePositions(ctx context.Context) {
+	if e.positionWriter == nil {
+		return
+	}
+	positions, err := e.positionWriter.GetOpen(ctx)
+	if err != nil {
+		e.log.Error("failed to restore positions", "error", err)
+		return
+	}
+	e.openPositions = positions
+	e.portfolio.OpenPositions = len(positions)
+	e.log.Info("positions restored from DB", "count", len(positions))
+}
+
 // Run starts the main trading loop.
 func (e *Engine) Run(ctx context.Context) error {
 	e.log.Info("trading engine started",
@@ -117,26 +159,55 @@ func (e *Engine) tick(ctx context.Context) {
 		e.closePosition(ctx, &pos)
 	}
 
-	// 2. Generate signals based on mode.
-	for _, tkr := range e.tickers {
-		var sig *domain.Signal
+	// 2. Consume pending news signals from DB (written by analyzer).
+	e.consumeNewsSignals(ctx)
 
-		switch e.mode {
-		case domain.ModeTA:
-			sig = e.generateTASignal(ctx, tkr)
-		case domain.ModeNews:
-			// News signals come from the external news pipeline,
-			// not generated here. They're pushed via ProcessNewsSignal.
-			continue
-		case domain.ModeCombined:
-			sig = e.generateCombinedSignal(ctx, tkr)
+	// 3. Generate TA/combined signals based on mode.
+	if e.mode != domain.ModeNews {
+		for _, tkr := range e.tickers {
+			var sig *domain.Signal
+			switch e.mode {
+			case domain.ModeTA:
+				sig = e.generateTASignal(ctx, tkr)
+			case domain.ModeCombined:
+				sig = e.generateCombinedSignal(ctx, tkr)
+			}
+			if sig == nil {
+				continue
+			}
+			e.processSignal(ctx, sig, tkr)
+		}
+	}
+}
+
+// consumeNewsSignals reads pending news signals from DB and processes them.
+func (e *Engine) consumeNewsSignals(ctx context.Context) {
+	if e.signalReader == nil {
+		return
+	}
+
+	pending, err := e.signalReader.GetPendingBySource(ctx, string(domain.SourceNews), 50)
+	if err != nil {
+		e.log.Warn("failed to read pending news signals", "error", err)
+		return
+	}
+
+	for i := range pending {
+		sig := &pending[i]
+		e.log.Info("consuming news signal from DB",
+			"id", sig.ID,
+			"ticker", sig.Ticker,
+			"direction", sig.Direction,
+			"strength", sig.Strength,
+		)
+
+		// Mark as executed immediately (regardless of whether risk allows it).
+		if markErr := e.signalReader.MarkExecuted(ctx, sig.ID); markErr != nil {
+			e.log.Warn("failed to mark signal executed", "id", sig.ID, "error", markErr)
 		}
 
-		if sig == nil {
-			continue
-		}
-
-		e.processSignal(ctx, sig, tkr)
+		// Route through the appropriate processing path.
+		e.ProcessNewsSignal(ctx, sig)
 	}
 }
 
@@ -288,6 +359,13 @@ func (e *Engine) processSignal(ctx context.Context, sig *domain.Signal, ticker s
 			pos.Side = domain.SideShort
 		}
 
+		// Persist to DB.
+		if e.positionWriter != nil {
+			if _, dbErr := e.positionWriter.Insert(ctx, &pos); dbErr != nil {
+				e.log.Error("failed to persist position to DB", "ticker", ticker, "error", dbErr)
+			}
+		}
+
 		e.openPositions = append(e.openPositions, pos)
 		e.portfolio.OpenPositions = len(e.openPositions)
 		e.portfolio.Cash -= *order.FilledPrice * float64(order.FilledQty)
@@ -339,6 +417,13 @@ func (e *Engine) closePosition(ctx context.Context, pos *domain.Position) {
 	}
 	e.openPositions = remaining
 	e.portfolio.OpenPositions = len(e.openPositions)
+
+	// Persist close to DB.
+	if e.positionWriter != nil {
+		if dbErr := e.positionWriter.Close(ctx, pos); dbErr != nil {
+			e.log.Error("failed to persist position close to DB", "ticker", pos.Ticker, "error", dbErr)
+		}
+	}
 
 	e.log.Info("position closed",
 		"ticker", pos.Ticker,

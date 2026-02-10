@@ -88,10 +88,11 @@ func main() {
 	newsRepo := postgres.NewNewsRepo(db)
 	companyRepo := postgres.NewCompanyRepo(db)
 	heatRepo := postgres.NewHeatRepo(db)
+	signalRepo := postgres.NewSignalRepo(db)
 
 	cls := classifier.NewClassifier(router, log)
 	sc := scorer.NewScorer(heatRepo, log)
-	agg := aggregator.NewAggregator(newsRepo, companyRepo, cls, sc, log)
+	agg := aggregator.NewAggregator(newsRepo, companyRepo, signalRepo, cls, router, sc, log)
 
 	// Start worker pool
 	workers := cfg.Analyzer.Workers

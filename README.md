@@ -19,26 +19,29 @@
                                         │
 ┌──────────────────────────┐            │
 │      ANALYZER            │◀───────────┘
-│  LLM classify + score    │
-│  3 провайдера (см. ниже) │     ┌──────────────┐
-│  batch + round-robin     │────▶│  PostgreSQL   │
+│  80% fast LLM classify   │
+│  20% heavy deep analysis │     ┌──────────────┐
+│  → trading signals в DB  │────▶│  PostgreSQL   │
 └──────────────────────────┘     └──────┬───────┘
                                         │
 ┌──────────────────────────┐            │
 │      TRADER              │◀───────────┘
-│  3 modes: news/ta/combo  │
-│  15 TA indicators        │     ┌──────────────┐
-│  risk management         │────▶│  MOEX ISS    │
-└──────────────────────────┘     └──────────────┘
+│  reads signals from DB   │     ┌──────────────┐
+│  3 modes: news/ta/combo  │────▶│  T-Invest    │
+│  15 TA indicators        │     │  (gRPC API)  │
+│  risk mgmt + positions   │     │  primary     │
+└──────────────────────────┘     └──────┬───────┘
                                         │
-┌──────────────────────────┐            │
-│      API + WEB UI        │◀───────────┘
-│  REST API + Vue.js SPA   │     ┌──────────────┐
-│  SSE real-time quotes    │────▶│  T-Invest    │
-│  TradingView charts      │     │  (gRPC API)  │
-│  T-Invest admin panel    │     └──────────────┘
+┌──────────────────────────┐     ┌──────────────┐
+│      API + WEB UI        │────▶│  MOEX ISS    │
+│  REST API + Vue.js SPA   │     │  (fallback)  │
+│  SSE real-time quotes    │     └──────────────┘
+│  TradingView charts      │
+│  T-Invest admin panel    │
 └──────────────────────────┘
 ```
+
+> **T-Invest API** — основной источник данных и исполнения ордеров. **MOEX ISS API** — бесплатный fallback для котировок и свечей когда T-Invest не подключен.
 
 ## 5 микросервисов
 
@@ -164,6 +167,78 @@ export TELEGRAM_ALERT_CHAT_ID=-1001234567890
 export DASHSCOPE_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 export DEEPSEEK_API_KEY="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
 ```
+
+## Бизнес-логика: полный пайплайн
+
+### 1. Сбор новостей (Collector)
+
+```
+Telegram MTProto  ──┐
+RSS (5 фидов)     ──┤──▶ dedup (Redis set) ──▶ PostgreSQL ──▶ Redis queue (BRPOP)
+                    │
+```
+
+- Телеграм-каналы подключаются через MTProto userbot (история + real-time)
+- Дедупликация по хешу текста (Redis `news_dedup` set, TTL 48h)
+- ID новости ставится в очередь Redis `news:queue` для обработки
+
+### 2. Анализ новостей (Analyzer)
+
+```
+Redis queue ──▶ Worker Pool (N воркеров) ──▶ LLM ──▶ PostgreSQL
+```
+
+**Этап 1: Быстрая классификация (80% запросов → Ollama qwen3:8b)**
+- Категория (20 типов: корпоративные, макро, ЦБ, геополитика, ...)
+- Sentiment (-1.0 ... +1.0)
+- Urgency (1-5)
+- Reliability (0-1)
+- Тикеры (SBER, GAZP, ...)
+- Ключевые факты + summary
+
+**Этап 2: Глубокий анализ (20% запросов → тяжёлый LLM)**
+- Критерий: urgency >= 4 ИЛИ |sentiment| >= 0.7
+- Детальная оценка влияния на каждый тикер: direction, magnitude, timeframe, confidence
+- Провайдеры: Ollama qwen3:14b → Qwen-Plus API → DeepSeek API (fallback)
+
+**Этап 3: Торговые сигналы**
+- Создаются для новостей с urgency >= 3 и |sentiment| >= 0.4
+- Direction: BUY (sentiment > 0.1), SELL (sentiment < -0.1)
+- Strength = 0.3×(urgency/5) + 0.4×|sentiment| + 0.3×reliability
+- Сигналы записываются в таблицу `trading_signals` (поле `executed=false`)
+
+### 3. Heat scoring
+
+- Каждый impact обновляет `heat_scores` — скользящий показатель "горячести" тикера
+- Используется при формировании портфеля и на heatmap UI
+
+### 4. Торговый движок (Trader)
+
+```
+DB Signals ──▶ Engine tick loop ──▶ Risk Check ──▶ Execute ──▶ Position
+```
+
+**Цикл (каждые N минут):**
+1. **SL/TP**: проверка стоп-лосс/тейк-профит по открытым позициям
+2. **News signals**: чтение из БД (таблица `trading_signals` WHERE executed=false)
+3. **TA signals**: генерация по индикаторам (в режиме ta/combined)
+4. **Risk check**: размер позиции, exposure, сектор, дневной лимит, drawdown
+5. **Execute**: размещение ордера (dry-run или T-Invest broker)
+6. **Persist**: позиция сохраняется в PostgreSQL, восстанавливается при рестарте
+
+**Формирование портфеля:**
+- Если тикеры не указаны в конфиге — динамический отбор
+- Selector ранжирует universe по сигнальной силе → top-N в портфель
+
+### 5. Исполнение ордеров
+
+| Режим | Описание |
+|-------|----------|
+| **Dry-run** | Логируется без реального исполнения |
+| **Broker** | T-Invest PostOrder → рыночный/лимитный ордер |
+
+- BrokerExecutor проверяет маржу, конвертирует лоты, отправляет через T-Invest gRPC
+- Мульти-аккаунт: разные стратегии (news/ta/combined) на разные счета
 
 ## Торговая система
 
