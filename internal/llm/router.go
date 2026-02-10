@@ -89,7 +89,8 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 	}
 
 	// Build the priority chain for heavy tasks.
-	// Order: OllamaHeavy → QwenPlus → DeepSeek → Claude → other OpenAI-compat providers
+	// Order: OllamaHeavy → QwenPlus → Extra Qwen models (free quota) → DeepSeek (paid backup) → Claude
+	// This ensures all free DashScope quotas are exhausted before falling back to DeepSeek.
 	if r.ollamaHeavy != nil {
 		r.heavyProviders = append(r.heavyProviders, &contextAwareProvider{client: r.ollamaHeavy})
 	}
@@ -107,7 +108,23 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 		r.apiProviders = append(r.apiProviders, qp)
 	}
 
-	// DeepSeek (OpenAI-compatible)
+	// Extra OpenAI-compatible providers (free Qwen quota models go BEFORE DeepSeek)
+	for _, p := range cfg.ExtraProviders {
+		if p.BaseURL == "" || p.Model == "" {
+			continue
+		}
+		client := openai.NewClient(openai.Config{
+			BaseURL:    p.BaseURL,
+			APIKey:     p.APIKey,
+			Model:      p.Model,
+			MaxTokens:  p.MaxTokens,
+			TimeoutSec: p.TimeoutSeconds,
+		})
+		r.heavyProviders = append(r.heavyProviders, client)
+		r.apiProviders = append(r.apiProviders, client)
+	}
+
+	// DeepSeek (OpenAI-compatible) — last resort paid backup, after all free Qwen quotas
 	if cfg.DeepSeek.BaseURL != "" && cfg.DeepSeek.APIKey != "" {
 		ds := openai.NewClient(openai.Config{
 			BaseURL:    cfg.DeepSeek.BaseURL,
@@ -127,21 +144,17 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 		r.apiProviders = append(r.apiProviders, claudeClient)
 	}
 
-	// Extra OpenAI-compatible providers
-	for _, p := range cfg.ExtraProviders {
-		if p.BaseURL == "" || p.Model == "" {
-			continue
-		}
-		client := openai.NewClient(openai.Config{
-			BaseURL:    p.BaseURL,
-			APIKey:     p.APIKey,
-			Model:      p.Model,
-			MaxTokens:  p.MaxTokens,
-			TimeoutSec: p.TimeoutSeconds,
-		})
-		r.heavyProviders = append(r.heavyProviders, client)
-		r.apiProviders = append(r.apiProviders, client)
+	// Log provider chain at startup
+	var names []string
+	for _, p := range r.apiProviders {
+		names = append(names, p.ModelName())
 	}
+	log.Info("LLM провайдеры инициализированы",
+		"fast", cfg.Ollama.Model,
+		"api_chain", names,
+		"total_heavy", len(r.heavyProviders),
+		"total_api", len(r.apiProviders),
+	)
 
 	return r
 }
@@ -260,11 +273,18 @@ func (r *Router) tryHeavyProviders(ctx context.Context, taskType TaskType, syste
 		r.log.Debug("trying provider", "model", provider.ModelName(), "task", taskType)
 		resp, err := provider.Generate(ctx, system, prompt)
 		if err != nil {
-			r.log.Warn("provider failed, trying next",
-				"model", provider.ModelName(),
-				"task", taskType,
-				"error", err,
-			)
+			if errors.Is(err, openai.ErrQuotaExhausted) {
+				r.log.Error("КВОТА ИСЧЕРПАНА — провайдер отключён",
+					"model", provider.ModelName(),
+					"active_providers", r.countAvailable(r.heavyProviders),
+				)
+			} else {
+				r.log.Warn("provider failed, trying next",
+					"model", provider.ModelName(),
+					"task", taskType,
+					"error", err,
+				)
+			}
 			lastErr = err
 			continue
 		}
