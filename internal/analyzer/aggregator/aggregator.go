@@ -50,11 +50,10 @@ func (a *Aggregator) ProcessNews(ctx context.Context, news *domain.News) error {
 		return err
 	}
 
-	a.log.Info("news classified",
+	a.log.Debug("classified",
 		"news_id", news.ID,
 		"category", result.Category,
 		"sentiment", result.Sentiment,
-		"urgency", result.Urgency,
 		"tickers", result.Tickers,
 		"model", model,
 	)

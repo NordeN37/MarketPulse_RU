@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -91,21 +93,59 @@ func main() {
 
 	log.Info("starting analyzer workers", "count", workers)
 
+	var stats analyzerStats
+	stats.startedAt = time.Now()
+
+	// Periodic stats reporter
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ok := stats.processed.Load()
+				fail := stats.errors.Load()
+				total := ok + fail
+				if total == 0 {
+					log.Info("analyzer: ожидание новостей в очереди...")
+					continue
+				}
+				elapsed := time.Since(stats.startedAt).Seconds()
+				log.Info("analyzer: статистика",
+					"обработано", ok,
+					"ошибок", fail,
+					"скорость", fmt.Sprintf("%.1f/мин", float64(total)/elapsed*60),
+				)
+			}
+		}
+	}()
+
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()
-			runWorker(ctx, workerID, cache, newsRepo, agg, log)
+			runWorker(ctx, workerID, cache, newsRepo, agg, &stats, log)
 		}(i)
 	}
 
 	wg.Wait()
-	log.Info("analyzer service stopped")
+
+	ok := stats.processed.Load()
+	fail := stats.errors.Load()
+	log.Info("analyzer service stopped", "обработано", ok, "ошибок", fail)
 }
 
-func runWorker(ctx context.Context, id int, cache *redisclient.Client, newsRepo *postgres.NewsRepo, agg *aggregator.Aggregator, log *slog.Logger) {
-	log = log.With("worker", id)
+type analyzerStats struct {
+	processed atomic.Int64
+	errors    atomic.Int64
+	startedAt time.Time
+}
+
+func runWorker(ctx context.Context, id int, cache *redisclient.Client, newsRepo *postgres.NewsRepo, agg *aggregator.Aggregator, stats *analyzerStats, log *slog.Logger) {
+	log = log.With("w", id)
 	log.Info("worker started")
 
 	for {
@@ -135,6 +175,7 @@ func runWorker(ctx context.Context, id int, cache *redisclient.Client, newsRepo 
 		news, err := newsRepo.GetByID(ctx, newsID)
 		if err != nil {
 			log.Error("failed to get news", "news_id", newsID, "error", err)
+			stats.errors.Add(1)
 			continue
 		}
 		if news == nil {
@@ -142,12 +183,42 @@ func runWorker(ctx context.Context, id int, cache *redisclient.Client, newsRepo 
 			continue
 		}
 
+		// Compact preview for logging
+		preview := truncate(news.Title, 60)
+		if preview == "" {
+			preview = truncate(news.Content, 60)
+		}
+
+		start := time.Now()
+		log.Info("анализ",
+			"id", newsID,
+			"src", news.SourceChannel,
+			"text", preview,
+		)
+
 		// Process through aggregator
 		if err := agg.ProcessNews(ctx, news); err != nil {
-			log.Error("failed to process news",
-				"news_id", newsID,
+			log.Error("ошибка анализа",
+				"id", newsID,
 				"error", err,
+				"ms", time.Since(start).Milliseconds(),
 			)
+			stats.errors.Add(1)
+			continue
 		}
+
+		stats.processed.Add(1)
+		log.Info("готово",
+			"id", newsID,
+			"ms", time.Since(start).Milliseconds(),
+		)
 	}
+}
+
+func truncate(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "…"
 }
