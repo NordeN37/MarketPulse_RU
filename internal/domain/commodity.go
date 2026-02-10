@@ -15,15 +15,46 @@ type Commodity struct {
 
 // Predefined commodity codes.
 const (
+	// Energy
 	CommodityBrent  = "BRENT"
 	CommodityWTI    = "WTI"
-	CommodityNG     = "NG"    // natural gas
-	CommodityGold   = "GOLD"
-	CommoditySilver = "SILVER"
+	CommodityUrals  = "URALS"
+	CommodityNG     = "NG"    // natural gas (Henry Hub)
+	CommodityTTF    = "TTF"   // natural gas (EU)
+	CommodityLNG    = "LNG"   // LNG (Asia JKM)
+	CommodityCoal   = "COAL"
+	CommodityUranium = "URANIUM"
+
+	// Precious metals
+	CommodityGold      = "GOLD"
+	CommoditySilver    = "SILVER"
 	CommodityPalladium = "PALLADIUM"
 	CommodityPlatinum  = "PLATINUM"
-	CommodityCopper = "COPPER"
+	CommodityRhodium   = "RHODIUM"
+
+	// Industrial metals
+	CommodityCopper    = "COPPER"
 	CommodityAluminium = "ALUMINIUM"
-	CommodityNickel = "NICKEL"
-	CommodityWheat  = "WHEAT"
+	CommodityNickel    = "NICKEL"
+	CommodityZinc      = "ZINC"
+	CommodityTin       = "TIN"
+	CommodityLead      = "LEAD"
+	CommodityIron      = "IRON"
+	CommodityLithium   = "LITHIUM"
+	CommodityCobalt    = "COBALT"
+
+	// Agriculture
+	CommodityWheat   = "WHEAT"
+	CommodityCorn    = "CORN"
+	CommoditySoybean = "SOYBEAN"
+	CommodityCocoa   = "COCOA"
+	CommodityCoffee  = "COFFEE"
+	CommoditySugar   = "SUGAR"
+	CommodityCotton  = "COTTON"
+	CommodityRice    = "RICE"
+	CommodityPalm    = "PALM"
+
+	// Fertilizers
+	CommodityUrea   = "UREA"
+	CommodityPotash = "POTASH"
 )

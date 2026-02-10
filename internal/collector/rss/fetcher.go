@@ -43,6 +43,10 @@ func DefaultFeeds() []Feed {
 		{Name: "Коммерсантъ", URL: "https://www.kommersant.ru/RSS/main.xml", Channel: "kommersant"},
 		{Name: "Коммерсантъ Новости", URL: "https://www.kommersant.ru/RSS/news.xml", Channel: "kommersant_news"},
 
+		// РИА Новости
+		{Name: "РИА Новости", URL: "https://ria.ru/export/rss2/archive/index.xml", Channel: "ria"},
+		{Name: "РИА Экономика", URL: "https://ria.ru/export/rss2/economy/index.xml", Channel: "ria_economy"},
+
 		// ── Международные источники (заголовки, англ.) ───────────
 		// Wall Street Journal
 		{Name: "WSJ Markets", URL: "https://feeds.a.dj.com/rss/RSSMarketsMain.xml", Channel: "wsj_markets"},
@@ -60,6 +64,8 @@ func DefaultFeeds() []Feed {
 
 		// Reuters (убрали RSS в 2020 — используем Google News как прокси)
 		{Name: "Reuters via Google", URL: "https://news.google.com/rss/search?q=when:24h+allinurl:reuters.com&ceid=US:en&hl=en-US&gl=US", Channel: "reuters"},
+		// Reuters Россия — фильтр по русскоязычным финансовым новостям Reuters
+		{Name: "Reuters Россия via Google", URL: "https://news.google.com/rss/search?q=when:24h+allinurl:reuters.com+%D0%A0%D0%BE%D1%81%D1%81%D0%B8%D1%8F+OR+%D1%80%D1%83%D0%B1%D0%BB%D1%8C+OR+%D0%9C%D0%BE%D1%81%D0%BA%D0%B2%D0%B0&ceid=US:en&hl=ru&gl=RU", Channel: "reuters_russia"},
 	}
 }
 
