@@ -55,10 +55,13 @@ llm:
     timeout_seconds: 120
     thinking: false  # disable thinking for fast JSON extraction
 
-  # ollama_heavy disabled — one local model is enough, heavy tasks go to Qwen-Plus API
+  # Heavy model — participates in batch round-robin alongside API providers
+  # Ollama auto-unloads unused models, so no extra RAM in standard mode
   ollama_heavy:
-    base_url: ""
-    model: ""
+    base_url: "http://localhost:11434"
+    model: "qwen3:14b"
+    timeout_seconds: 300
+    thinking: false  # thinking off for batch classification speed
 
   # Qwen-Plus API (DashScope) — heavy tasks + fallback when Ollama fails
   # Best Russian language quality ($0.40/1M input, $1.20/1M output)
