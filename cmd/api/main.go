@@ -67,6 +67,10 @@ func main() {
 	// Setup HTTP routes
 	mux := http.NewServeMux()
 
+	// =====================================================
+	// API Endpoints
+	// =====================================================
+
 	// Health check
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		queueLen, _ := cache.QueueLen(r.Context())
@@ -109,14 +113,14 @@ func main() {
 	mux.HandleFunc("GET /api/companies", func(w http.ResponseWriter, r *http.Request) {
 		search := r.URL.Query().Get("q")
 		var companies []domain.Company
-		var err error
+		var compErr error
 		if search != "" {
-			companies, err = companyRepo.SearchByName(r.Context(), search)
+			companies, compErr = companyRepo.SearchByName(r.Context(), search)
 		} else {
-			companies, err = companyRepo.GetAll(r.Context())
+			companies, compErr = companyRepo.GetAll(r.Context())
 		}
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+		if compErr != nil {
+			writeError(w, http.StatusInternalServerError, compErr.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, companies)
@@ -200,6 +204,93 @@ func main() {
 		writeJSON(w, http.StatusOK, quote)
 	})
 
+	// =====================================================
+	// Candle data (proxied from MOEX ISS)
+	// =====================================================
+	mux.HandleFunc("GET /api/candles/{ticker}", func(w http.ResponseWriter, r *http.Request) {
+		ticker := r.PathValue("ticker")
+		intervalStr := r.URL.Query().Get("interval")
+		if intervalStr == "" {
+			intervalStr = "1h"
+		}
+		interval, ok := moex.StringToInterval[intervalStr]
+		if !ok {
+			writeError(w, http.StatusBadRequest, "invalid interval, use: 1m, 10m, 1h, 1d, 1w, 1M")
+			return
+		}
+		days, _ := strconv.Atoi(r.URL.Query().Get("days"))
+		if days <= 0 || days > 365 {
+			days = 30
+		}
+
+		now := time.Now()
+		from := now.AddDate(0, 0, -days)
+
+		candles, err := moexClient.GetCandlesAll(r.Context(), ticker, interval, from, now)
+		if err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, candles)
+	})
+
+	// =====================================================
+	// Trading signals (demo data when DB is empty)
+	// =====================================================
+	mux.HandleFunc("GET /api/signals", func(w http.ResponseWriter, r *http.Request) {
+		// Return configured tickers as reference for demo.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"signals": []any{},
+			"tickers": cfg.Trading.Tickers,
+			"mode":    cfg.Trading.Mode,
+		})
+	})
+
+	// =====================================================
+	// Portfolios (returns config for 3 portfolio types)
+	// =====================================================
+	mux.HandleFunc("GET /api/portfolios", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"portfolios": []map[string]any{
+				{
+					"type":         "news",
+					"name":         "Новостной",
+					"description":  "Торговля только по новостным сигналам",
+					"initial_cash": 50000,
+					"tickers":      cfg.Trading.Tickers,
+				},
+				{
+					"type":         "ta",
+					"name":         "Технический",
+					"description":  "Торговля только по техническому анализу",
+					"initial_cash": 50000,
+					"tickers":      cfg.Trading.Tickers,
+				},
+				{
+					"type":         "combined",
+					"name":         "Комбинированный",
+					"description":  "Совмещение новостей и технического анализа",
+					"initial_cash": 50000,
+					"tickers":      cfg.Trading.Tickers,
+				},
+			},
+			"risk":     cfg.Trading.Risk,
+			"strategy": cfg.Trading.Strategy,
+		})
+	})
+
+	// =====================================================
+	// Static files — serve Vue.js SPA from web/
+	// =====================================================
+	webFS := http.FileServer(http.Dir("web"))
+	mux.Handle("GET /js/", webFS)
+	mux.Handle("GET /css/", webFS)
+	mux.Handle("GET /assets/", webFS)
+	// SPA fallback: serve index.html for any non-API route
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "web/index.html")
+	})
+
 	// CORS middleware
 	handler := corsMiddleware(cfg.API.CORSOrigins, mux)
 
@@ -215,7 +306,7 @@ func main() {
 		server.Shutdown(shutdownCtx)
 	}()
 
-	log.Info("API server starting", "addr", cfg.API.Addr())
+	log.Info("API server starting", "addr", cfg.API.Addr(), "web_ui", "http://"+cfg.API.Addr())
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		log.Error("server error", "error", err)
 		os.Exit(1)
@@ -241,8 +332,8 @@ func corsMiddleware(origins []string, next http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if originSet[origin] {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
+		if originSet[origin] || origin == "" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		}

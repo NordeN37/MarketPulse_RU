@@ -1,0 +1,611 @@
+/* ============================================================
+   MarketPulse_RU — Dark Theme Styles
+   ============================================================ */
+
+:root {
+    --mp-bg-primary:    #0d1117;
+    --mp-bg-secondary:  #161b22;
+    --mp-bg-tertiary:   #1c2128;
+    --mp-bg-card:       #161b22;
+    --mp-border:        #30363d;
+    --mp-border-light:  #21262d;
+    --mp-text-primary:  #e6edf3;
+    --mp-text-secondary:#8b949e;
+    --mp-text-muted:    #484f58;
+    --mp-accent:        #58a6ff;
+    --mp-accent-hover:  #79c0ff;
+    --mp-green:         #3fb950;
+    --mp-green-dim:     #238636;
+    --mp-red:           #f85149;
+    --mp-red-dim:       #da3633;
+    --mp-orange:        #d29922;
+    --mp-purple:        #bc8cff;
+    --mp-yellow:        #e3b341;
+    --mp-sidebar-width: 240px;
+    --mp-sidebar-collapsed: 0px;
+    --mp-topbar-height: 48px;
+}
+
+/* Base */
+html, body {
+    background-color: var(--mp-bg-primary);
+    color: var(--mp-text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    min-height: 100vh;
+    margin: 0;
+    overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--mp-bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--mp-border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--mp-text-muted); }
+
+/* ---- Text utilities ---- */
+.text-accent  { color: var(--mp-accent) !important; }
+.text-up      { color: var(--mp-green) !important; }
+.text-down    { color: var(--mp-red) !important; }
+.text-flat    { color: var(--mp-text-secondary) !important; }
+
+/* ============================================================
+   Sidebar
+   ============================================================ */
+.mp-sidebar {
+    width: var(--mp-sidebar-width);
+    min-height: 100vh;
+    background-color: var(--mp-bg-secondary);
+    border-right: 1px solid var(--mp-border);
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1040;
+    transition: width 0.2s ease, transform 0.2s ease;
+}
+
+.mp-sidebar__brand {
+    border-bottom: 1px solid var(--mp-border);
+    min-height: 56px;
+}
+
+.mp-sidebar__title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.mp-nav-link {
+    color: var(--mp-text-secondary) !important;
+    border-radius: 6px;
+    padding: 0.55rem 0.75rem;
+    margin-bottom: 2px;
+    font-size: 0.9rem;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.mp-nav-link:hover {
+    color: var(--mp-text-primary) !important;
+    background-color: var(--mp-bg-tertiary);
+}
+
+.mp-nav-link.active {
+    color: #fff !important;
+    background-color: rgba(88, 166, 255, 0.15) !important;
+    border-left: 3px solid var(--mp-accent);
+}
+
+.mp-sidebar__footer {
+    border-top: 1px solid var(--mp-border);
+}
+
+/* Mobile: collapsed sidebar */
+@media (max-width: 767.98px) {
+    .mp-sidebar {
+        transform: translateX(0);
+    }
+    .mp-sidebar--collapsed {
+        transform: translateX(-100%);
+    }
+}
+
+/* ---- Main area ---- */
+.mp-main {
+    margin-left: var(--mp-sidebar-width);
+    min-height: 100vh;
+    background-color: var(--mp-bg-primary);
+}
+
+@media (max-width: 767.98px) {
+    .mp-main {
+        margin-left: 0;
+    }
+}
+
+.mp-topbar {
+    background-color: var(--mp-bg-secondary);
+    border-bottom: 1px solid var(--mp-border);
+}
+
+/* ============================================================
+   Cards
+   ============================================================ */
+.mp-card {
+    background-color: var(--mp-bg-card);
+    border: 1px solid var(--mp-border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.mp-card-header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--mp-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--mp-bg-tertiary);
+}
+
+.mp-card-header__title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mp-text-secondary);
+    margin: 0;
+}
+
+.mp-card-body {
+    padding: 1rem;
+}
+
+/* ============================================================
+   Tables
+   ============================================================ */
+.mp-table {
+    width: 100%;
+    font-size: 0.875rem;
+}
+
+.mp-table thead th {
+    background-color: var(--mp-bg-tertiary);
+    color: var(--mp-text-secondary);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--mp-border);
+    white-space: nowrap;
+}
+
+.mp-table tbody tr {
+    border-bottom: 1px solid var(--mp-border-light);
+    transition: background 0.1s;
+}
+
+.mp-table tbody tr:hover {
+    background-color: var(--mp-bg-tertiary);
+}
+
+.mp-table td {
+    padding: 0.55rem 0.75rem;
+    vertical-align: middle;
+}
+
+.mp-table-clickable tbody tr {
+    cursor: pointer;
+}
+
+/* ============================================================
+   Badges
+   ============================================================ */
+.badge-buy {
+    background-color: var(--mp-green-dim) !important;
+    color: var(--mp-green) !important;
+}
+
+.badge-sell {
+    background-color: var(--mp-red-dim) !important;
+    color: var(--mp-red) !important;
+}
+
+.badge-hold {
+    background-color: var(--mp-border) !important;
+    color: var(--mp-text-secondary) !important;
+}
+
+.badge-news {
+    background-color: rgba(88, 166, 255, 0.15) !important;
+    color: var(--mp-accent) !important;
+}
+
+.badge-ta {
+    background-color: rgba(210, 153, 34, 0.15) !important;
+    color: var(--mp-orange) !important;
+}
+
+.badge-combined {
+    background-color: rgba(63, 185, 80, 0.15) !important;
+    color: var(--mp-green) !important;
+}
+
+.badge-info {
+    background-color: rgba(88, 166, 255, 0.15) !important;
+    color: var(--mp-accent) !important;
+}
+
+.badge-important {
+    background-color: rgba(210, 153, 34, 0.15) !important;
+    color: var(--mp-orange) !important;
+}
+
+.badge-urgent {
+    background-color: rgba(248, 81, 73, 0.15) !important;
+    color: var(--mp-red) !important;
+}
+
+.badge-critical {
+    background-color: var(--mp-red-dim) !important;
+    color: #fff !important;
+}
+
+/* ============================================================
+   Heatmap
+   ============================================================ */
+.mp-heatmap {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 4px;
+}
+
+.mp-heatmap__cell {
+    padding: 0.5rem 0.4rem;
+    border-radius: 4px;
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: default;
+    transition: transform 0.1s;
+    line-height: 1.2;
+}
+
+.mp-heatmap__cell:hover {
+    transform: scale(1.05);
+}
+
+.mp-heatmap__cell .ticker {
+    display: block;
+    font-size: 0.7rem;
+    opacity: 0.85;
+}
+
+.mp-heatmap__cell .score {
+    display: block;
+    font-size: 0.85rem;
+}
+
+/* ============================================================
+   Gridstack widgets
+   ============================================================ */
+.grid-stack {
+    min-height: 400px;
+}
+
+.grid-stack-item-content {
+    background-color: var(--mp-bg-card);
+    border: 1px solid var(--mp-border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.mp-widget-header {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--mp-border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: var(--mp-bg-tertiary);
+    cursor: move;
+    min-height: 38px;
+    flex-shrink: 0;
+}
+
+.mp-widget-header__title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--mp-text-secondary);
+    margin: 0;
+}
+
+.mp-widget-header__actions .btn {
+    padding: 0.1rem 0.35rem;
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+.mp-widget-body {
+    padding: 0.75rem;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+/* ============================================================
+   Charts — TradingView container sizing
+   ============================================================ */
+.mp-chart-container {
+    width: 100%;
+    height: 100%;
+    min-height: 350px;
+    position: relative;
+}
+
+.mp-chart-container-full {
+    width: 100%;
+    height: 450px;
+    position: relative;
+}
+
+.mp-chart-container-sm {
+    width: 100%;
+    height: 250px;
+    position: relative;
+}
+
+/* Force TV chart to fill container */
+.mp-chart-container canvas,
+.mp-chart-container-full canvas,
+.mp-chart-container-sm canvas {
+    width: 100% !important;
+}
+
+/* ============================================================
+   Page header
+   ============================================================ */
+.mp-page-header {
+    padding: 1.25rem 1.5rem 0.75rem;
+    border-bottom: 1px solid var(--mp-border);
+    background-color: var(--mp-bg-secondary);
+}
+
+.mp-page-header h1 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.mp-page-content {
+    padding: 1.25rem 1.5rem;
+}
+
+/* ============================================================
+   Stat cards (portfolio, overview)
+   ============================================================ */
+.mp-stat {
+    text-align: center;
+    padding: 0.75rem;
+}
+
+.mp-stat__value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.mp-stat__label {
+    font-size: 0.75rem;
+    color: var(--mp-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-top: 0.25rem;
+}
+
+/* ============================================================
+   News card
+   ============================================================ */
+.mp-news-card {
+    background-color: var(--mp-bg-card);
+    border: 1px solid var(--mp-border);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 0.75rem;
+    transition: border-color 0.15s;
+}
+
+.mp-news-card:hover {
+    border-color: var(--mp-accent);
+}
+
+.mp-news-card__title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+    color: var(--mp-text-primary);
+}
+
+.mp-news-card__meta {
+    font-size: 0.75rem;
+    color: var(--mp-text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.mp-news-card__content {
+    font-size: 0.85rem;
+    color: var(--mp-text-secondary);
+    line-height: 1.5;
+}
+
+/* Sentiment dot */
+.mp-sentiment-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 4px;
+    vertical-align: middle;
+}
+.mp-sentiment-dot--positive { background-color: var(--mp-green); }
+.mp-sentiment-dot--negative { background-color: var(--mp-red); }
+.mp-sentiment-dot--neutral  { background-color: var(--mp-text-muted); }
+
+/* ============================================================
+   Strength bar
+   ============================================================ */
+.mp-strength-bar {
+    height: 6px;
+    border-radius: 3px;
+    background-color: var(--mp-border);
+    overflow: hidden;
+}
+
+.mp-strength-bar__fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* ============================================================
+   Loading & empty states
+   ============================================================ */
+.mp-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    color: var(--mp-text-secondary);
+}
+
+.mp-empty {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: var(--mp-text-muted);
+}
+
+.mp-empty i {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+    display: block;
+}
+
+/* ============================================================
+   Tab styles override
+   ============================================================ */
+.nav-tabs {
+    border-bottom-color: var(--mp-border);
+}
+
+.nav-tabs .nav-link {
+    color: var(--mp-text-secondary);
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+}
+
+.nav-tabs .nav-link:hover {
+    color: var(--mp-text-primary);
+    border-bottom-color: var(--mp-border);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--mp-accent);
+    background: transparent;
+    border-bottom-color: var(--mp-accent);
+}
+
+/* ============================================================
+   Portfolio cards
+   ============================================================ */
+.mp-portfolio-card {
+    background-color: var(--mp-bg-card);
+    border: 1px solid var(--mp-border);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.1s;
+}
+
+.mp-portfolio-card:hover {
+    border-color: var(--mp-accent);
+    transform: translateY(-2px);
+}
+
+.mp-portfolio-card.active {
+    border-color: var(--mp-accent);
+}
+
+.mp-portfolio-card__header {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--mp-border);
+    background-color: var(--mp-bg-tertiary);
+}
+
+.mp-portfolio-card__body {
+    padding: 1rem;
+}
+
+/* ============================================================
+   Responsive tweaks
+   ============================================================ */
+@media (max-width: 767.98px) {
+    .mp-page-header {
+        padding: 1rem;
+    }
+    .mp-page-content {
+        padding: 1rem;
+    }
+    .mp-chart-container-full {
+        height: 300px;
+    }
+}
+
+/* ============================================================
+   Misc utilities
+   ============================================================ */
+.cursor-pointer { cursor: pointer; }
+
+.mp-fade-enter-active,
+.mp-fade-leave-active {
+    transition: opacity 0.15s ease;
+}
+.mp-fade-enter-from,
+.mp-fade-leave-to {
+    opacity: 0;
+}
+
+/* Widget toggle dropdown */
+.mp-widget-toggle-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+/* Ensure gridstack placeholder matches theme */
+.grid-stack > .grid-stack-placeholder > .placeholder-content {
+    border: 1px dashed var(--mp-accent) !important;
+    background-color: rgba(88, 166, 255, 0.05) !important;
+    border-radius: 8px;
+}
+
+/* Search input */
+.mp-search-input {
+    background-color: var(--mp-bg-tertiary);
+    border: 1px solid var(--mp-border);
+    color: var(--mp-text-primary);
+    border-radius: 6px;
+}
+
+.mp-search-input:focus {
+    background-color: var(--mp-bg-tertiary);
+    border-color: var(--mp-accent);
+    color: var(--mp-text-primary);
+    box-shadow: 0 0 0 2px rgba(88, 166, 255, 0.15);
+}
+
+.mp-search-input::placeholder {
+    color: var(--mp-text-muted);
+}
