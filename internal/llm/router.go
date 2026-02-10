@@ -64,8 +64,10 @@ type Router struct {
 	ollamaHeavy *ollama.Client
 	// External providers for complex tasks, ordered by priority
 	heavyProviders []Provider
-	cfg            config.LLMConfig
-	log            *slog.Logger
+	// API-only providers for batch mode (no local Ollama — it's too slow on CPU)
+	apiProviders []Provider
+	cfg          config.LLMConfig
+	log          *slog.Logger
 	// forceHeavy overrides routing — all tasks go through heavy chain (skip Ollama)
 	forceHeavy bool
 	// rrCounter round-robin counter for distributing across providers in batch mode
@@ -101,6 +103,7 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 			TimeoutSec: cfg.QwenPlus.TimeoutSeconds,
 		})
 		r.heavyProviders = append(r.heavyProviders, qp)
+		r.apiProviders = append(r.apiProviders, qp)
 	}
 
 	// DeepSeek (OpenAI-compatible)
@@ -113,12 +116,14 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 			TimeoutSec: cfg.DeepSeek.TimeoutSeconds,
 		})
 		r.heavyProviders = append(r.heavyProviders, ds)
+		r.apiProviders = append(r.apiProviders, ds)
 	}
 
 	// Claude
 	claudeClient := claude.NewClient(cfg.Claude)
 	if claudeClient.IsAvailable() {
 		r.heavyProviders = append(r.heavyProviders, claudeClient)
+		r.apiProviders = append(r.apiProviders, claudeClient)
 	}
 
 	// Extra OpenAI-compatible providers
@@ -134,6 +139,7 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 			TimeoutSec: p.TimeoutSeconds,
 		})
 		r.heavyProviders = append(r.heavyProviders, client)
+		r.apiProviders = append(r.apiProviders, client)
 	}
 
 	return r
@@ -157,10 +163,15 @@ func (r *Router) Generate(ctx context.Context, taskType TaskType, system, prompt
 	}
 }
 
-// generateRoundRobin distributes requests across all heavy providers evenly.
+// generateRoundRobin distributes requests across API providers evenly (no local Ollama).
 // If the chosen provider fails, falls back to others.
 func (r *Router) generateRoundRobin(ctx context.Context, taskType TaskType, system, prompt string) (string, string, error) {
-	n := len(r.heavyProviders)
+	providers := r.apiProviders
+	if len(providers) == 0 {
+		// Fallback to all heavy providers if no API-only providers configured
+		providers = r.heavyProviders
+	}
+	n := len(providers)
 	if n == 0 {
 		return "", "", fmt.Errorf("no API providers available for batch mode")
 	}
@@ -170,7 +181,7 @@ func (r *Router) generateRoundRobin(ctx context.Context, taskType TaskType, syst
 
 	// Try starting from the round-robin pick, then rotate through others
 	for i := 0; i < n; i++ {
-		p := r.heavyProviders[(idx+i)%n]
+		p := providers[(idx+i)%n]
 		if !p.IsAvailable() {
 			continue
 		}
