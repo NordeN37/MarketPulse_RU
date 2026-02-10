@@ -67,7 +67,6 @@
             var signalsLoading = ref(false);
 
             var lastUpdated = ref(null);
-            var refreshTimer = null;
 
             /* Chart refs */
             var chartInstance = null;
@@ -246,9 +245,15 @@
                 return quote.value.change || quote.value.CHANGE || quote.value.lasttoprevprice || null;
             }
 
-            async function silentRefresh() {
-                await Promise.allSettled([fetchQuote(), fetchNews(), fetchSignals()]);
-                lastUpdated.value = new Date();
+            var unsubQuotes = null;
+            var newsRefreshTimer = null;
+
+            function onQuotesUpdate(allQuotes) {
+                var t = ticker.value;
+                if (allQuotes[t]) {
+                    quote.value = allQuotes[t];
+                    lastUpdated.value = new Date();
+                }
             }
 
             /* Watchers */
@@ -273,11 +278,17 @@
 
             onMounted(function () {
                 init();
-                refreshTimer = setInterval(silentRefresh, 30000);
+                unsubQuotes = QuoteStream.subscribe(onQuotesUpdate);
+                // Refresh news & signals every 30s (non-quote data)
+                newsRefreshTimer = setInterval(function () {
+                    fetchNews();
+                    fetchSignals();
+                }, 30000);
             });
 
             onBeforeUnmount(function () {
-                if (refreshTimer) clearInterval(refreshTimer);
+                if (unsubQuotes) unsubQuotes();
+                if (newsRefreshTimer) clearInterval(newsRefreshTimer);
                 if (resizeObserver) resizeObserver.disconnect();
                 if (chartInstance) { chartInstance.remove(); chartInstance = null; }
             });

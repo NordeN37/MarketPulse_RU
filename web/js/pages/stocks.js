@@ -40,7 +40,6 @@
             var sectorFilter = ref('');
             var loading = ref(true);
             var lastUpdated = ref(null);
-            var refreshTimer = null;
             var sortCol = ref('ticker');
             var sortDir = ref(1); // 1=asc, -1=desc
 
@@ -147,35 +146,34 @@
                 router.push('/stocks/' + ticker);
             }
 
+            var unsubQuotes = null;
+
+            function onQuotesUpdate(allQuotes) {
+                for (var t in allQuotes) {
+                    if (t === 'IMOEX') continue;
+                    quotes.value[t] = allQuotes[t];
+                }
+                lastUpdated.value = new Date();
+            }
+
             async function fetchData() {
                 loading.value = true;
                 try {
                     var data = await API.getCompanies();
                     companies.value = Array.isArray(data) ? data : [];
-                    await refreshQuotes();
                 } catch (err) {
                     companies.value = [];
                 }
                 loading.value = false;
             }
 
-            async function refreshQuotes() {
-                var promises = companies.value.map(function (c) {
-                    return API.getQuote(c.ticker).then(function (q) {
-                        quotes.value[c.ticker] = q;
-                    }).catch(function () {});
-                });
-                await Promise.allSettled(promises);
-                lastUpdated.value = new Date();
-            }
-
             onMounted(function () {
                 fetchData();
-                refreshTimer = setInterval(refreshQuotes, 30000);
+                unsubQuotes = QuoteStream.subscribe(onQuotesUpdate);
             });
 
             onBeforeUnmount(function () {
-                if (refreshTimer) clearInterval(refreshTimer);
+                if (unsubQuotes) unsubQuotes();
             });
 
             return {

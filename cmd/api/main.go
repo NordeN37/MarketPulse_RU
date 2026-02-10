@@ -17,6 +17,7 @@ import (
 	"github.com/NordeN37/MarketPulse_RU/internal/domain"
 	"github.com/NordeN37/MarketPulse_RU/internal/market/moex"
 	"github.com/NordeN37/MarketPulse_RU/internal/storage/postgres"
+	"github.com/NordeN37/MarketPulse_RU/internal/stream"
 	redisclient "github.com/NordeN37/MarketPulse_RU/internal/storage/redis"
 )
 
@@ -72,6 +73,10 @@ func main() {
 	portfolioRepo := postgres.NewPortfolioRepo(db)
 	tradeRepo := postgres.NewTradeRepo(db)
 	moexClient := moex.NewClient(cfg.MOEX, log)
+
+	// Start SSE quote broadcaster (polls MOEX every 10s, pushes via SSE)
+	quoteBroadcaster := stream.NewQuoteBroadcaster(moexClient, companyRepo, 10*time.Second, log)
+	go quoteBroadcaster.Run(ctx)
 
 	// Setup HTTP routes
 	mux := http.NewServeMux()
@@ -308,6 +313,16 @@ func main() {
 			return
 		}
 		writeJSON(w, http.StatusOK, candles)
+	})
+
+	// =====================================================
+	// SSE: real-time quote stream
+	// =====================================================
+	mux.Handle("GET /api/stream/quotes", quoteBroadcaster)
+
+	// REST fallback: get cached quotes (for initial page load)
+	mux.HandleFunc("GET /api/quotes", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, quoteBroadcaster.GetLatest())
 	})
 
 	// =====================================================

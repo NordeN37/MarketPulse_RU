@@ -174,6 +174,69 @@
         /** Universe info (all monitored companies + sector breakdown) */
         getUniverse: function () {
             return request('/api/universe');
+        },
+
+        /** All cached quotes (REST fallback) */
+        getAllQuotes: function () {
+            return request('/api/quotes');
+        }
+    };
+
+    /**
+     * QuoteStream — singleton SSE connection for real-time quotes.
+     * Multiple pages can subscribe; the connection is shared.
+     *
+     * Usage:
+     *   var unsub = QuoteStream.subscribe(function(quotes) { ... });
+     *   // quotes is { "SBER": { secid, last, change, ... }, ... }
+     *   unsub(); // when component unmounts
+     */
+    var listeners = [];
+    var eventSource = null;
+    var reconnectDelay = 1000;
+
+    function ensureConnection() {
+        if (eventSource) return;
+        eventSource = new EventSource('/api/stream/quotes');
+        reconnectDelay = 1000;
+
+        eventSource.addEventListener('quotes', function (e) {
+            try {
+                var data = JSON.parse(e.data);
+                for (var i = 0; i < listeners.length; i++) {
+                    listeners[i](data);
+                }
+            } catch (_) {}
+        });
+
+        eventSource.onerror = function () {
+            // EventSource auto-reconnects, but we reset if closed
+            if (eventSource && eventSource.readyState === 2) {
+                eventSource.close();
+                eventSource = null;
+                if (listeners.length > 0) {
+                    setTimeout(ensureConnection, reconnectDelay);
+                    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+                }
+            }
+        };
+    }
+
+    function maybeDisconnect() {
+        if (listeners.length === 0 && eventSource) {
+            eventSource.close();
+            eventSource = null;
+        }
+    }
+
+    window.QuoteStream = {
+        subscribe: function (callback) {
+            listeners.push(callback);
+            ensureConnection();
+            return function unsubscribe() {
+                listeners = listeners.filter(function (fn) { return fn !== callback; });
+                maybeDisconnect();
+            };
         }
     };
 })();

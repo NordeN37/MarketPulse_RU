@@ -177,20 +177,31 @@
 
             var lastUpdated = ref(null);
 
-            /* Fetch data (silent=true skips loading spinner for auto-refresh) */
+            /* Handle incoming SSE quotes */
+            function onQuotesUpdate(allQuotes) {
+                // Update index
+                if (allQuotes['IMOEX']) {
+                    var iq = allQuotes['IMOEX'];
+                    indexData.last = iq.last || null;
+                    indexData.change = iq.change || null;
+                }
+                // Update ticker quotes
+                for (var t in allQuotes) {
+                    if (t === 'IMOEX') continue;
+                    quotes.value[t] = allQuotes[t];
+                }
+                // Update quoteTickers if not set yet (from SSE data)
+                if (quoteTickers.value.length === 0) {
+                    var tickers = Object.keys(allQuotes).filter(function (t) { return t !== 'IMOEX'; });
+                    quoteTickers.value = tickers.slice(0, 10);
+                }
+                lastUpdated.value = new Date();
+            }
+
+            /* Fetch non-quote data (silent=true skips loading spinner) */
             async function fetchAll(silent) {
                 if (!silent) loading.value = true;
                 var promises = [];
-
-                promises.push(
-                    API.getIndex('IMOEX').then(function (d) {
-                        if (d) {
-                            indexData.last = d.last || d.LAST || d.price || null;
-                            indexData.change = d.change || d.CHANGE || d.lasttoprevprice || null;
-                            indexData.name = 'IMOEX';
-                        }
-                    }).catch(function () {})
-                );
 
                 promises.push(
                     API.getSignals().then(function (d) {
@@ -222,49 +233,42 @@
                     }).catch(function () { portfolios.value = []; })
                 );
 
-                /* Load top companies for quick quotes (if not yet loaded) */
-                if (quoteTickers.value.length === 0) {
+                /* Load companies list (for universe count + ticker names) */
+                if (universeCount.value === 0) {
                     promises.push(
                         API.getCompanies().then(function (companies) {
                             if (!Array.isArray(companies)) return;
                             universeCount.value = companies.length;
-                            /* Sort by market_cap desc, take top 10 for quotes */
-                            var sorted = companies.slice().sort(function (a, b) {
-                                return (b.market_cap || 0) - (a.market_cap || 0);
-                            });
-                            var top = sorted.slice(0, 10).map(function (c) { return c.ticker; });
-                            if (top.length === 0) top = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN'];
-                            quoteTickers.value = top;
-                        }).catch(function () {
-                            quoteTickers.value = ['SBER', 'GAZP', 'LKOH', 'YNDX', 'GMKN'];
-                        })
+                            /* If SSE hasn't set tickers yet, pick top 10 by market cap */
+                            if (quoteTickers.value.length === 0) {
+                                var sorted = companies.slice().sort(function (a, b) {
+                                    return (b.market_cap || 0) - (a.market_cap || 0);
+                                });
+                                quoteTickers.value = sorted.slice(0, 10).map(function (c) { return c.ticker; });
+                            }
+                        }).catch(function () {})
                     );
                 }
 
                 await Promise.allSettled(promises);
-
-                /* Fetch quotes for loaded tickers */
-                var quotePromises = quoteTickers.value.map(function (t) {
-                    return API.getQuote(t).then(function (d) {
-                        quotes.value[t] = d;
-                    }).catch(function () {});
-                });
-
-                await Promise.allSettled(quotePromises);
                 loading.value = false;
-                lastUpdated.value = new Date();
             }
 
             var refreshInterval = null;
+            var unsubQuotes = null;
 
             onMounted(function () {
+                // Subscribe to real-time quotes via SSE
+                unsubQuotes = QuoteStream.subscribe(onQuotesUpdate);
                 fetchAll().then(function () {
                     nextTick(function () { initGrid(); });
                 });
+                // Refresh non-quote data every 30s
                 refreshInterval = setInterval(function () { fetchAll(true); }, 30000);
             });
 
             onBeforeUnmount(function () {
+                if (unsubQuotes) unsubQuotes();
                 if (refreshInterval) clearInterval(refreshInterval);
                 if (gridInstance) { gridInstance.destroy(false); gridInstance = null; }
             });

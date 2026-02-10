@@ -161,6 +161,73 @@ func (c *Client) GetIndex(ctx context.Context, index string) (*Quote, error) {
 	return q, nil
 }
 
+// GetAllQuotes fetches market data for ALL securities on TQBR board in a single API call.
+// Much more efficient than calling GetQuote per ticker.
+func (c *Client) GetAllQuotes(ctx context.Context) (map[string]*Quote, error) {
+	url := fmt.Sprintf("%s/engines/stock/markets/shares/boards/TQBR/securities.json?iss.meta=off&iss.only=marketdata&marketdata.columns=SECID,LAST,OPEN,HIGH,LOW,LASTTOPREVPRICE,VOLTODAY,VALTODAY", c.baseURL)
+
+	data, err := c.doRequest(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+
+	var resp struct {
+		MarketData struct {
+			Columns []string        `json:"columns"`
+			Data    [][]interface{} `json:"data"`
+		} `json:"marketdata"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		return nil, fmt.Errorf("parsing MOEX batch response: %w", err)
+	}
+
+	colIdx := makeColumnIndex(resp.MarketData.Columns)
+	now := time.Now()
+	result := make(map[string]*Quote, len(resp.MarketData.Data))
+
+	for _, row := range resp.MarketData.Data {
+		secIdx, ok := colIdx["SECID"]
+		if !ok || secIdx >= len(row) || row[secIdx] == nil {
+			continue
+		}
+		secID, _ := row[secIdx].(string)
+		if secID == "" {
+			continue
+		}
+
+		q := &Quote{SecID: secID, UpdatedAt: now}
+		if idx, ok := colIdx["LAST"]; ok && idx < len(row) && row[idx] != nil {
+			q.Last, _ = row[idx].(float64)
+		}
+		if q.Last == 0 {
+			continue // skip securities with no last price
+		}
+		if idx, ok := colIdx["OPEN"]; ok && idx < len(row) && row[idx] != nil {
+			q.Open, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["HIGH"]; ok && idx < len(row) && row[idx] != nil {
+			q.High, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["LOW"]; ok && idx < len(row) && row[idx] != nil {
+			q.Low, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["LASTTOPREVPRICE"]; ok && idx < len(row) && row[idx] != nil {
+			q.Change, _ = row[idx].(float64)
+		}
+		if idx, ok := colIdx["VOLTODAY"]; ok && idx < len(row) && row[idx] != nil {
+			if v, ok := row[idx].(float64); ok {
+				q.Volume = int64(v)
+			}
+		}
+		if idx, ok := colIdx["VALTODAY"]; ok && idx < len(row) && row[idx] != nil {
+			q.Value, _ = row[idx].(float64)
+		}
+		result[secID] = q
+	}
+
+	return result, nil
+}
+
 func (c *Client) doRequest(ctx context.Context, url string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
