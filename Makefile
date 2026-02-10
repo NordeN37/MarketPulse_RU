@@ -15,6 +15,10 @@ run-collector:
 run-analyzer:
 	go run ./cmd/analyzer -config configs/config.yaml
 
+# Batch classification via Qwen-Plus API (8 workers, skip Ollama)
+run-analyzer-batch:
+	go run ./cmd/analyzer -config configs/config.yaml -batch -workers 8
+
 run-api:
 	go run ./cmd/api -config configs/config.yaml
 

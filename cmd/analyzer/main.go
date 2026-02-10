@@ -23,6 +23,8 @@ import (
 
 func main() {
 	configPath := flag.String("config", "configs/config.yaml", "path to config file")
+	batch := flag.Bool("batch", false, "batch mode: force API providers (skip Ollama)")
+	batchWorkers := flag.Int("workers", 0, "override worker count (0 = use config)")
 	flag.Parse()
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -69,6 +71,11 @@ func main() {
 	// Setup LLM router
 	router := llm.NewRouter(cfg.LLM, log)
 
+	if *batch {
+		router.SetForceHeavy(true)
+		log.Info("BATCH MODE: all tasks routed to API providers (Qwen-Plus → DeepSeek)")
+	}
+
 	providers := router.AvailableProviders(ctx)
 	if len(providers) > 0 {
 		log.Info("LLM providers available", "providers", providers)
@@ -87,6 +94,9 @@ func main() {
 
 	// Start worker pool
 	workers := cfg.Analyzer.Workers
+	if *batchWorkers > 0 {
+		workers = *batchWorkers
+	}
 	if workers <= 0 {
 		workers = 4
 	}

@@ -65,6 +65,8 @@ type Router struct {
 	heavyProviders []Provider
 	cfg            config.LLMConfig
 	log            *slog.Logger
+	// forceHeavy overrides routing — all tasks go through heavy chain (skip Ollama)
+	forceHeavy bool
 }
 
 // NewRouter creates a new multi-provider LLM task router.
@@ -134,8 +136,16 @@ func NewRouter(cfg config.LLMConfig, log *slog.Logger) *Router {
 	return r
 }
 
+// SetForceHeavy forces all tasks through the heavy provider chain (API), skipping Ollama.
+func (r *Router) SetForceHeavy(force bool) {
+	r.forceHeavy = force
+}
+
 // Generate routes the task to the appropriate LLM and returns (response, model_name, error).
 func (r *Router) Generate(ctx context.Context, taskType TaskType, system, prompt string) (string, string, error) {
+	if r.forceHeavy {
+		return r.generateHeavy(ctx, taskType, system, prompt)
+	}
 	switch taskType {
 	case TaskDeepAnalysis, TaskDigest, TaskChainAnalysis:
 		return r.generateHeavy(ctx, taskType, system, prompt)

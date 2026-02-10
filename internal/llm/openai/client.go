@@ -108,27 +108,57 @@ func (c *Client) Generate(ctx context.Context, system, prompt string) (string, e
 		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return "", fmt.Errorf("sending request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
 	var chatResp ChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
-		return "", fmt.Errorf("decoding response: %w", err)
+	maxRetries := 5
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Re-create request body for retry
+			httpReq, err = http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+			if err != nil {
+				return "", fmt.Errorf("creating request: %w", err)
+			}
+			httpReq.Header.Set("Content-Type", "application/json")
+			if c.apiKey != "" {
+				httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+			}
+		}
+
+		resp, err := c.httpClient.Do(httpReq)
+		if err != nil {
+			return "", fmt.Errorf("sending request: %w", err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests {
+			resp.Body.Close()
+			wait := time.Duration(2<<uint(attempt)) * time.Second // 2s, 4s, 8s, 16s, 32s
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(wait):
+			}
+			continue
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return "", fmt.Errorf("provider returned status %d: %s", resp.StatusCode, string(respBody))
+		}
+
+		if err := json.NewDecoder(resp.Body).Decode(&chatResp); err != nil {
+			resp.Body.Close()
+			return "", fmt.Errorf("decoding response: %w", err)
+		}
+		resp.Body.Close()
+
+		if len(chatResp.Choices) == 0 {
+			return "", fmt.Errorf("empty response from provider")
+		}
+
+		return chatResp.Choices[0].Message.Content, nil
 	}
 
-	if len(chatResp.Choices) == 0 {
-		return "", fmt.Errorf("empty response from provider")
-	}
-
-	return chatResp.Choices[0].Message.Content, nil
+	return "", fmt.Errorf("rate limited after %d retries", maxRetries)
 }
 
 // IsAvailable checks if the API is configured.
