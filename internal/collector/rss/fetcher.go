@@ -43,9 +43,11 @@ func DefaultFeeds() []Feed {
 		{Name: "Коммерсантъ", URL: "https://www.kommersant.ru/RSS/main.xml", Channel: "kommersant"},
 		{Name: "Коммерсантъ Новости", URL: "https://www.kommersant.ru/RSS/news.xml", Channel: "kommersant_news"},
 
-		// РИА Новости
+		// РИА Новости (единый фид, экономика включена)
 		{Name: "РИА Новости", URL: "https://ria.ru/export/rss2/archive/index.xml", Channel: "ria"},
-		{Name: "РИА Экономика", URL: "https://ria.ru/export/rss2/economy/index.xml", Channel: "ria_economy"},
+
+		// Известия
+		{Name: "Известия", URL: "https://iz.ru/xml/rss/all.xml", Channel: "izvestia"},
 
 		// ── Международные источники (заголовки, англ.) ───────────
 		// Wall Street Journal

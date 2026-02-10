@@ -21,8 +21,9 @@ func NewCompanyRepo(db *DB) *CompanyRepo {
 // GetAll returns all companies.
 func (r *CompanyRepo) GetAll(ctx context.Context) ([]domain.Company, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, ticker, name, sector, country, moex_id, smartlab_id,
-		       market_cap, is_watchlist, created_at, updated_at
+		SELECT id, ticker, name, COALESCE(sector,''), country,
+		       COALESCE(moex_id,''), COALESCE(smartlab_id,''),
+		       COALESCE(market_cap,0), is_watchlist, created_at, updated_at
 		FROM companies
 		ORDER BY ticker`)
 	if err != nil {
@@ -68,8 +69,9 @@ func (r *CompanyRepo) GetAllTickers(ctx context.Context) ([]string, error) {
 func (r *CompanyRepo) GetByTicker(ctx context.Context, ticker string) (*domain.Company, error) {
 	var c domain.Company
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT id, ticker, name, sector, country, moex_id, smartlab_id,
-		       market_cap, is_watchlist, created_at, updated_at
+		SELECT id, ticker, name, COALESCE(sector,''), country,
+		       COALESCE(moex_id,''), COALESCE(smartlab_id,''),
+		       COALESCE(market_cap,0), is_watchlist, created_at, updated_at
 		FROM companies WHERE ticker = $1`, ticker).Scan(
 		&c.ID, &c.Ticker, &c.Name, &c.Sector, &c.Country,
 		&c.MoexID, &c.SmartlabID, &c.MarketCap, &c.IsWatchlist,
@@ -88,8 +90,9 @@ func (r *CompanyRepo) GetByTicker(ctx context.Context, ticker string) (*domain.C
 func (r *CompanyRepo) GetByID(ctx context.Context, id int64) (*domain.Company, error) {
 	var c domain.Company
 	err := r.db.Pool.QueryRow(ctx, `
-		SELECT id, ticker, name, sector, country, moex_id, smartlab_id,
-		       market_cap, is_watchlist, created_at, updated_at
+		SELECT id, ticker, name, COALESCE(sector,''), country,
+		       COALESCE(moex_id,''), COALESCE(smartlab_id,''),
+		       COALESCE(market_cap,0), is_watchlist, created_at, updated_at
 		FROM companies WHERE id = $1`, id).Scan(
 		&c.ID, &c.Ticker, &c.Name, &c.Sector, &c.Country,
 		&c.MoexID, &c.SmartlabID, &c.MarketCap, &c.IsWatchlist,
@@ -107,8 +110,9 @@ func (r *CompanyRepo) GetByID(ctx context.Context, id int64) (*domain.Company, e
 // GetBySector returns all companies in a given sector.
 func (r *CompanyRepo) GetBySector(ctx context.Context, sector string) ([]domain.Company, error) {
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, ticker, name, sector, country, moex_id, smartlab_id,
-		       market_cap, is_watchlist, created_at, updated_at
+		SELECT id, ticker, name, COALESCE(sector,''), country,
+		       COALESCE(moex_id,''), COALESCE(smartlab_id,''),
+		       COALESCE(market_cap,0), is_watchlist, created_at, updated_at
 		FROM companies WHERE sector = $1
 		ORDER BY market_cap DESC`, sector)
 	if err != nil {
@@ -135,8 +139,9 @@ func (r *CompanyRepo) GetBySector(ctx context.Context, sector string) ([]domain.
 func (r *CompanyRepo) SearchByName(ctx context.Context, query string) ([]domain.Company, error) {
 	pattern := "%" + query + "%"
 	rows, err := r.db.Pool.Query(ctx, `
-		SELECT id, ticker, name, sector, country, moex_id, smartlab_id,
-		       market_cap, is_watchlist, created_at, updated_at
+		SELECT id, ticker, name, COALESCE(sector,''), country,
+		       COALESCE(moex_id,''), COALESCE(smartlab_id,''),
+		       COALESCE(market_cap,0), is_watchlist, created_at, updated_at
 		FROM companies
 		WHERE name ILIKE $1 OR ticker ILIKE $1
 		ORDER BY market_cap DESC
