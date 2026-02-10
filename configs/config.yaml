@@ -87,6 +87,23 @@ llm:
     api_key: ""
     model: ""
 
+  # Extra providers — auto-fallback when primary model quota is exhausted.
+  # Each DashScope model has its own independent 1M token free quota.
+  # When qwen-plus runs out, router auto-switches to these.
+  extra_providers:
+    - name: "Qwen-Plus-Snapshot"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
+      api_key: "${DASHSCOPE_API_KEY}"
+      model: "qwen-plus-2025-07-28"
+      max_tokens: 4096
+      timeout_seconds: 120
+    - name: "Qwen3-Max"
+      base_url: "https://dashscope-intl.aliyuncs.com/compatible-mode"
+      api_key: "${DASHSCOPE_API_KEY}"
+      model: "qwen3-max"
+      max_tokens: 4096
+      timeout_seconds: 120
+
 collector:
   # How often to poll RSS feeds (Telegram is push-based)
   rss_poll_interval: "5m"

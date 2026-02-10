@@ -4,11 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"sync/atomic"
 	"time"
 )
+
+// ErrQuotaExhausted is returned when the provider's free quota is depleted (403).
+// The router should permanently disable this provider and switch to alternatives.
+var ErrQuotaExhausted = errors.New("quota exhausted")
 
 // Client communicates with any OpenAI-compatible API (DeepSeek, OpenRouter, etc.).
 type Client struct {
@@ -17,6 +24,7 @@ type Client struct {
 	model      string
 	maxTokens  int
 	httpClient *http.Client
+	disabled   atomic.Bool // set to true when quota is exhausted
 }
 
 // Config holds settings for an OpenAI-compatible provider.
@@ -80,6 +88,10 @@ type ChatResponse struct {
 
 // Generate sends a prompt to the provider and returns the response text.
 func (c *Client) Generate(ctx context.Context, system, prompt string) (string, error) {
+	if c.disabled.Load() {
+		return "", fmt.Errorf("%w: model %s", ErrQuotaExhausted, c.model)
+	}
+
 	messages := []ChatMessage{}
 	if system != "" {
 		messages = append(messages, ChatMessage{Role: "system", Content: system})
@@ -139,6 +151,20 @@ func (c *Client) Generate(ctx context.Context, system, prompt string) (string, e
 			continue
 		}
 
+		if resp.StatusCode == http.StatusForbidden {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			bodyStr := string(respBody)
+			// DashScope returns 403 with "AllocationQuota" when free tier is exhausted
+			if strings.Contains(bodyStr, "AllocationQuota") ||
+				strings.Contains(bodyStr, "quota") ||
+				strings.Contains(bodyStr, "Quota") {
+				c.disabled.Store(true)
+				return "", fmt.Errorf("%w: model %s — %s", ErrQuotaExhausted, c.model, bodyStr)
+			}
+			return "", fmt.Errorf("provider returned status 403: %s", bodyStr)
+		}
+
 		if resp.StatusCode != http.StatusOK {
 			respBody, _ := io.ReadAll(resp.Body)
 			resp.Body.Close()
@@ -161,9 +187,9 @@ func (c *Client) Generate(ctx context.Context, system, prompt string) (string, e
 	return "", fmt.Errorf("rate limited after %d retries", maxRetries)
 }
 
-// IsAvailable checks if the API is configured.
+// IsAvailable checks if the API is configured and not quota-exhausted.
 func (c *Client) IsAvailable() bool {
-	return c.baseURL != "" && c.model != ""
+	return c.baseURL != "" && c.model != "" && !c.disabled.Load()
 }
 
 // ModelName returns the configured model name.

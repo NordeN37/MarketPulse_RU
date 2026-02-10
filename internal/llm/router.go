@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync/atomic"
@@ -187,11 +188,18 @@ func (r *Router) generateRoundRobin(ctx context.Context, taskType TaskType, syst
 		}
 		resp, err := p.Generate(ctx, system, prompt)
 		if err != nil {
-			r.log.Warn("provider failed, trying next",
-				"model", p.ModelName(),
-				"task", taskType,
-				"error", err,
-			)
+			if errors.Is(err, openai.ErrQuotaExhausted) {
+				r.log.Error("КВОТА ИСЧЕРПАНА — провайдер отключён",
+					"model", p.ModelName(),
+					"active_providers", r.countAvailable(providers),
+				)
+			} else {
+				r.log.Warn("provider failed, trying next",
+					"model", p.ModelName(),
+					"task", taskType,
+					"error", err,
+				)
+			}
 			lastErr = err
 			continue
 		}
@@ -199,6 +207,17 @@ func (r *Router) generateRoundRobin(ctx context.Context, taskType TaskType, syst
 	}
 
 	return "", "", fmt.Errorf("all providers failed: %w", lastErr)
+}
+
+// countAvailable returns how many providers are still available.
+func (r *Router) countAvailable(providers []Provider) int {
+	n := 0
+	for _, p := range providers {
+		if p.IsAvailable() {
+			n++
+		}
+	}
+	return n
 }
 
 // generateFast uses the local Ollama fast model for routine tasks.
