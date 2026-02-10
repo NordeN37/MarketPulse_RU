@@ -2,8 +2,11 @@ package rss
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/mmcdole/gofeed"
@@ -74,11 +77,28 @@ type Fetcher struct {
 
 // NewFetcher creates a new RSS feed fetcher.
 func NewFetcher(feeds []Feed, handler MessageHandler, interval time.Duration, log *slog.Logger) *Fetcher {
+	// Custom HTTP client with aggressive timeouts to avoid hanging on slow/blocked hosts.
+	httpClient := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout:   5 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   5 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12},
+		},
+	}
+
+	parser := gofeed.NewParser()
+	parser.Client = httpClient
+
 	return &Fetcher{
 		feeds:    feeds,
 		handler:  handler,
 		interval: interval,
-		parser:   gofeed.NewParser(),
+		parser:   parser,
 		log:      log,
 	}
 }
@@ -105,18 +125,22 @@ func (f *Fetcher) Run(ctx context.Context) error {
 }
 
 func (f *Fetcher) fetchAll(ctx context.Context) {
+	var ok, fail int
 	for _, feed := range f.feeds {
 		if ctx.Err() != nil {
 			return
 		}
 		if err := f.fetchFeed(ctx, feed); err != nil {
-			f.log.Error("failed to fetch RSS feed",
+			fail++
+			f.log.Warn("failed to fetch RSS feed (will retry next cycle)",
 				"feed", feed.Name,
-				"url", feed.URL,
 				"error", err,
 			)
+		} else {
+			ok++
 		}
 	}
+	f.log.Info("RSS fetch cycle complete", "ok", ok, "failed", fail, "total", ok+fail)
 }
 
 func (f *Fetcher) fetchFeed(ctx context.Context, feed Feed) error {
