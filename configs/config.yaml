@@ -28,7 +28,7 @@ telegram:
   phone: "${TELEGRAM_PHONE}"
   # Channels to monitor (userbot joins them automatically)
   channels:
-    - "@newssmartlab"
+    - "@smartlabnews"
     - "@markettwits"
     - "@Bondholders"
     - "@ifax_go"
@@ -40,6 +40,8 @@ telegram:
     - "@tass_agency"
     - "@kommersant"
     - "@prime1"
+    - "@newssmartlab"
+    - "@izvestia"
   # Bot token for SENDING alerts (separate from userbot)
   bot_token: "${TELEGRAM_BOT_TOKEN}"
   alert_chat_id: ${TELEGRAM_ALERT_CHAT_ID:-0}

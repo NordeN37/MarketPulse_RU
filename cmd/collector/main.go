@@ -153,7 +153,7 @@ func main() {
 					if authBridge != nil {
 						histReader = histReader.WithAuthBridge(authBridge)
 					}
-					if histErr := histReader.ReadHistory(ctx, 200); histErr != nil {
+					if histErr := histReader.ReadHistory(ctx, 1500); histErr != nil {
 						log.Error("reread Telegram failed", "channel", channel, "error", histErr)
 					} else {
 						log.Info("reread Telegram completed", "channel", channel)
