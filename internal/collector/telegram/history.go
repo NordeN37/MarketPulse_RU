@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/3bl3gamer/tgclient"
@@ -104,14 +105,17 @@ func (h *HistoryReader) ReadHistory(ctx context.Context, maxMessages int) error 
 
 // readChannelHistory fetches history from a single channel.
 func (h *HistoryReader) readChannelHistory(ctx context.Context, client *tgclient.TGClient, username string, maxMessages int) (int, error) {
+	// Strip leading @ — MTProto expects bare username.
+	bare := strings.TrimPrefix(username, "@")
+
 	// Resolve channel.
 	res := client.SendSync(mtproto.TL_contacts_resolveUsername{
-		Username: username,
+		Username: bare,
 	})
 
 	resolved, ok := res.(mtproto.TL_contacts_resolvedPeer)
 	if !ok {
-		return 0, fmt.Errorf("could not resolve channel @%s: %T", username, res)
+		return 0, fmt.Errorf("could not resolve channel %s: %T", username, res)
 	}
 
 	var channelID int64
@@ -126,7 +130,7 @@ func (h *HistoryReader) readChannelHistory(ctx context.Context, client *tgclient
 		}
 	}
 	if channelID == 0 {
-		return 0, fmt.Errorf("channel @%s not found in resolved peers", username)
+		return 0, fmt.Errorf("channel %s not found in resolved peers", username)
 	}
 
 	inputChannel := mtproto.TL_inputChannel{
