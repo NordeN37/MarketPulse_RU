@@ -56,6 +56,11 @@ func main() {
 	}
 	defer db.Close()
 
+	if err := db.RunMigrations(ctx, log); err != nil {
+		log.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
 	// MOEX client for quotes and candles.
 	moexClient := moex.NewClient(cfg.MOEX, log)
 

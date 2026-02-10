@@ -52,6 +52,11 @@ func main() {
 	}
 	defer db.Close()
 
+	if err := db.RunMigrations(ctx, log); err != nil {
+		log.Error("failed to run migrations", "error", err)
+		os.Exit(1)
+	}
+
 	// Connect to Redis
 	cache, err := redisclient.New(cfg.Redis)
 	if err != nil {

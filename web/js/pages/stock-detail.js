@@ -178,9 +178,11 @@
                     var candles = Array.isArray(rawData) ? rawData : [];
 
                     var chartData = candles.map(function (c) {
-                        /* MOEX ISS returns: begin, open, close, high, low, value, volume */
+                        /* domain.Candle JSON: open_time (unix sec), open, high, low, close, volume */
                         var t;
-                        if (c.begin) {
+                        if (c.open_time) {
+                            t = typeof c.open_time === 'number' ? c.open_time : Math.floor(new Date(c.open_time).getTime() / 1000);
+                        } else if (c.begin) {
                             t = Math.floor(new Date(c.begin).getTime() / 1000);
                         } else if (c.time) {
                             t = typeof c.time === 'number' ? c.time : Math.floor(new Date(c.time).getTime() / 1000);
