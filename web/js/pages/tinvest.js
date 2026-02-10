@@ -31,7 +31,7 @@
             var connectError = ref('');
 
             // ---- Active tab ----
-            var activeTab = ref('overview'); // overview, portfolio, orders, instruments
+            var activeTab = ref('overview'); // overview, portfolio, orders, broker
 
             // ---- Portfolio state ----
             var selectedAccountId = ref('');
@@ -44,12 +44,6 @@
             var activeOrders     = ref([]);
             var ordersLoading    = ref(false);
             var ordersError      = ref('');
-
-            // ---- Instruments ----
-            var instruments      = ref([]);
-            var instrLoading     = ref(false);
-            var instrError       = ref('');
-            var instrSearch      = ref('');
 
             // ---- Strategy assignment ----
             var savingStrategies = ref(false);
@@ -67,16 +61,6 @@
             var streaming = ref(false);
 
             var pollTimer = null;
-
-            // Filtered instruments by search
-            var filteredInstruments = computed(function () {
-                if (!instrSearch.value) return instruments.value.slice(0, 100);
-                var q = instrSearch.value.toLowerCase();
-                return instruments.value.filter(function (i) {
-                    return i.ticker.toLowerCase().indexOf(q) >= 0 ||
-                           i.name.toLowerCase().indexOf(q) >= 0;
-                }).slice(0, 100);
-            });
 
             // ---- Fetch status ----
             async function fetchStatus() {
@@ -180,19 +164,6 @@
                 } catch (err) {
                     ordersError.value = err.message;
                 }
-            }
-
-            // ---- Load instruments ----
-            async function loadInstruments() {
-                instrLoading.value = true;
-                instrError.value = '';
-                try {
-                    var data = await API.getTInvestInstruments();
-                    instruments.value = data || [];
-                } catch (err) {
-                    instrError.value = err.message;
-                }
-                instrLoading.value = false;
             }
 
             // ---- Strategy assignment helpers ----
@@ -343,7 +314,6 @@
             watch(activeTab, function (tab) {
                 if (tab === 'portfolio') loadPortfolio();
                 if (tab === 'orders') loadOrders();
-                if (tab === 'instruments' && instruments.value.length === 0) loadInstruments();
                 if (tab === 'broker') { loadBrokerPortfolios(); loadWithdrawalConfig(); }
             });
 
@@ -371,9 +341,6 @@
                 activeOrders: activeOrders, ordersLoading: ordersLoading,
                 ordersError: ordersError, loadOrders: loadOrders,
                 cancelOrder: cancelOrder,
-                instruments: instruments, instrLoading: instrLoading,
-                instrError: instrError, instrSearch: instrSearch,
-                filteredInstruments: filteredInstruments, loadInstruments: loadInstruments,
                 getStrategy: getStrategy, setStrategy: setStrategy,
                 getStrategyEnabled: getStrategyEnabled, toggleStrategyEnabled: toggleStrategyEnabled,
                 saveStrategies: saveStrategies, savingStrategies: savingStrategies,
@@ -524,12 +491,6 @@
                     <a class="nav-link" :class="{ active: activeTab === 'broker' }"
                        href="#" @click.prevent="activeTab = 'broker'">
                         <i class="bi bi-wallet2 me-1"></i>Брокер
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" :class="{ active: activeTab === 'instruments' }"
-                       href="#" @click.prevent="activeTab = 'instruments'">
-                        <i class="bi bi-search me-1"></i>Инструменты
                     </a>
                 </li>
             </ul>
@@ -979,67 +940,6 @@
                 </div>
             </div>
 
-            <!-- ---- TAB: Instruments ---- -->
-            <div v-if="activeTab === 'instruments'">
-                <div v-if="instrLoading" class="text-center py-4">
-                    <span class="spinner-border spinner-border-sm"></span> Загрузка инструментов...
-                </div>
-                <div v-if="instrError" class="alert alert-danger py-2" style="font-size:0.85rem;">
-                    {{ instrError }}
-                </div>
-
-                <div class="mp-settings-card">
-                    <div class="mp-settings-card__header d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-search me-2"></i>Инструменты ({{ instruments.length }})</span>
-                        <button class="btn btn-sm btn-outline-secondary" @click="loadInstruments">
-                            <i class="bi bi-arrow-clockwise me-1"></i>Обновить
-                        </button>
-                    </div>
-                    <div class="mp-settings-card__body">
-                        <div class="mb-3" style="max-width:400px;">
-                            <input type="text" class="form-control form-control-sm"
-                                   v-model="instrSearch"
-                                   placeholder="Поиск по тикеру или названию...">
-                        </div>
-                        <div v-if="instruments.length > 0" class="table-responsive" style="max-height:500px; overflow-y:auto;">
-                            <table class="mp-table" style="font-size:0.82rem;">
-                                <thead>
-                                    <tr>
-                                        <th>Тикер</th>
-                                        <th>Название</th>
-                                        <th>Сектор</th>
-                                        <th>Валюта</th>
-                                        <th class="text-end">Лот</th>
-                                        <th class="text-center">API-торговля</th>
-                                        <th class="text-center">Шорт</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="inst in filteredInstruments" :key="inst.uid">
-                                        <td><strong>{{ inst.ticker }}</strong></td>
-                                        <td>{{ inst.name }}</td>
-                                        <td>{{ inst.sector }}</td>
-                                        <td>{{ inst.currency }}</td>
-                                        <td class="text-end">{{ inst.lot }}</td>
-                                        <td class="text-center">
-                                            <i class="bi" :class="inst.api_trade_available ? 'bi-check-circle text-success' : 'bi-x-circle text-muted'"></i>
-                                        </td>
-                                        <td class="text-center">
-                                            <i class="bi" :class="inst.short_enabled ? 'bi-check-circle text-success' : 'bi-x-circle text-muted'"></i>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                        <div v-if="!instrLoading && instruments.length === 0" class="text-muted" style="font-size:0.85rem;">
-                            Инструменты не загружены. Нажмите "Обновить" для загрузки.
-                        </div>
-                        <div v-if="filteredInstruments.length >= 100" class="text-muted mt-2" style="font-size:0.78rem;">
-                            Показаны первые 100 результатов. Используйте поиск для уточнения.
-                        </div>
-                    </div>
-                </div>
-            </div>
         </div>
     </div>
 </div>

@@ -1,5 +1,5 @@
 /* ============================================================
-   MarketPulse_RU — Stock Detail Page (TradingView chart)
+   MarketPulse_RU — Stock Detail Page (TradingView chart + Order Book)
    ============================================================ */
 (function () {
     'use strict';
@@ -45,6 +45,29 @@
         return n > 0 ? 'text-up' : 'text-down';
     }
 
+    /* Order book helpers */
+    function imbalanceColor(val) {
+        if (val > 0.3) return 'var(--mp-green)';
+        if (val < -0.3) return 'var(--mp-red)';
+        return 'var(--mp-text-secondary)';
+    }
+
+    function severityBadge(sev) {
+        if (sev === 'critical') return 'badge-critical';
+        if (sev === 'warning') return 'badge-urgent';
+        return 'badge-info';
+    }
+
+    function fmtPrice(v) {
+        return Number(v).toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function fmtVolume(v) {
+        if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
+        if (v >= 1000) return (v / 1000).toFixed(1) + 'K';
+        return String(v);
+    }
+
     window.PageStockDetail = {
         name: 'PageStockDetail',
         setup: function () {
@@ -58,13 +81,20 @@
             var chartLoading = ref(false);
             var interval  = ref('1d');
             var days      = ref(90);
-            var activeTab = ref('news');
+            var activeTab = ref('chart');
 
             /* Sub-tab data */
             var newsItems  = ref([]);
             var signals    = ref([]);
             var newsLoading = ref(false);
             var signalsLoading = ref(false);
+
+            /* Order book data */
+            var orderbook = ref(null);
+            var obAnomalies = ref([]);
+            var obLoading = ref(false);
+            var obError = ref('');
+            var obRefreshTimer = null;
 
             var lastUpdated = ref(null);
 
@@ -120,6 +150,36 @@
                 signalsLoading.value = false;
             }
 
+            /* ---- Order Book ---- */
+            async function fetchOrderBook() {
+                if (!ticker.value) return;
+                obLoading.value = true;
+                obError.value = '';
+                try {
+                    var data = await API.getOrderBook(ticker.value);
+                    orderbook.value = data.orderbook || null;
+                    obAnomalies.value = data.anomalies || [];
+                } catch (err) {
+                    obError.value = err.message || 'Ошибка загрузки стакана';
+                    orderbook.value = null;
+                    obAnomalies.value = [];
+                }
+                obLoading.value = false;
+            }
+
+            function startObRefresh() {
+                stopObRefresh();
+                obRefreshTimer = setInterval(fetchOrderBook, 10000);
+            }
+
+            function stopObRefresh() {
+                if (obRefreshTimer) {
+                    clearInterval(obRefreshTimer);
+                    obRefreshTimer = null;
+                }
+            }
+
+            /* ---- Chart ---- */
             function createChart() {
                 var container = document.getElementById('stock-chart');
                 if (!container) return;
@@ -180,7 +240,6 @@
                     var candles = Array.isArray(rawData) ? rawData : [];
 
                     var chartData = candles.map(function (c) {
-                        /* domain.Candle JSON: open_time (unix sec), open, high, low, close, volume */
                         var t;
                         if (c.open_time) {
                             t = typeof c.open_time === 'number' ? c.open_time : Math.floor(new Date(c.open_time).getTime() / 1000);
@@ -256,11 +315,27 @@
                 }
             }
 
+            /* Tab switching — load orderbook on first visit */
+            var obLoaded = false;
+            watch(function () { return activeTab.value; }, function (tab) {
+                if (tab === 'orderbook' && !obLoaded) {
+                    obLoaded = true;
+                    fetchOrderBook();
+                    startObRefresh();
+                }
+                if (tab !== 'orderbook') {
+                    stopObRefresh();
+                }
+            });
+
             /* Watchers */
             watch([interval, days], function () { loadCandles(); });
             watch(function () { return route.params.ticker; }, function (newTicker) {
                 if (newTicker && newTicker !== ticker.value) {
                     ticker.value = newTicker;
+                    obLoaded = false;
+                    orderbook.value = null;
+                    obAnomalies.value = [];
                     init();
                 }
             });
@@ -279,7 +354,6 @@
             onMounted(function () {
                 init();
                 unsubQuotes = QuoteStream.subscribe(onQuotesUpdate);
-                // Refresh news & signals every 30s (non-quote data)
                 newsRefreshTimer = setInterval(function () {
                     fetchNews();
                     fetchSignals();
@@ -289,6 +363,7 @@
             onBeforeUnmount(function () {
                 if (unsubQuotes) unsubQuotes();
                 if (newsRefreshTimer) clearInterval(newsRefreshTimer);
+                stopObRefresh();
                 if (resizeObserver) resizeObserver.disconnect();
                 if (chartInstance) { chartInstance.remove(); chartInstance = null; }
             });
@@ -306,15 +381,24 @@
                 signals: signals,
                 newsLoading: newsLoading,
                 signalsLoading: signalsLoading,
+                orderbook: orderbook,
+                obAnomalies: obAnomalies,
+                obLoading: obLoading,
+                obError: obError,
                 INTERVALS: INTERVALS,
                 DAYS_OPTIONS: DAYS_OPTIONS,
                 getPrice: getPrice,
                 getChange: getChange,
                 fmtChange: fmtChange,
+                fmtPrice: fmtPrice,
+                fmtVolume: fmtVolume,
                 changeClass: changeClass,
+                imbalanceColor: imbalanceColor,
+                severityBadge: severityBadge,
                 lastUpdated: lastUpdated,
                 fmtTime: fmtTime,
-                loadCandles: loadCandles
+                loadCandles: loadCandles,
+                fetchOrderBook: fetchOrderBook
             };
         },
         template: `
@@ -352,52 +436,182 @@
         </div>
 
         <div v-else>
-            <!-- Chart controls -->
-            <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
-                <div class="btn-group btn-group-sm">
-                    <button v-for="iv in INTERVALS" :key="iv.value"
-                            class="btn" :class="interval===iv.value ? 'btn-primary' : 'btn-outline-secondary'"
-                            @click="interval = iv.value">
-                        {{ iv.label }}
-                    </button>
-                </div>
-                <div class="btn-group btn-group-sm">
-                    <button v-for="d in DAYS_OPTIONS" :key="d.value"
-                            class="btn" :class="days===d.value ? 'btn-primary' : 'btn-outline-secondary'"
-                            @click="days = d.value">
-                        {{ d.label }}
-                    </button>
-                </div>
-                <div v-if="chartLoading" class="ms-2">
-                    <div class="spinner-border spinner-border-sm text-accent"></div>
-                </div>
-            </div>
-
-            <!-- TradingView Chart -->
-            <div class="mp-card mb-4">
-                <div id="stock-chart" class="mp-chart-container-full"></div>
-            </div>
-
-            <!-- Tabs: News / Signals / Analysis -->
+            <!-- Tabs -->
             <ul class="nav nav-tabs mb-3">
+                <li class="nav-item">
+                    <a class="nav-link" :class="{ active: activeTab === 'chart' }" href="#" @click.prevent="activeTab='chart'">
+                        <i class="bi bi-graph-up me-1"></i>График
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" :class="{ active: activeTab === 'orderbook' }" href="#" @click.prevent="activeTab='orderbook'">
+                        <i class="bi bi-bar-chart-steps me-1"></i>Стакан
+                    </a>
+                </li>
                 <li class="nav-item">
                     <a class="nav-link" :class="{ active: activeTab === 'news' }" href="#" @click.prevent="activeTab='news'">
                         <i class="bi bi-newspaper me-1"></i>Новости
+                        <span v-if="newsItems.length" class="badge bg-secondary ms-1" style="font-size:0.6rem;">{{ newsItems.length }}</span>
                     </a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link" :class="{ active: activeTab === 'signals' }" href="#" @click.prevent="activeTab='signals'">
                         <i class="bi bi-lightning-charge me-1"></i>Сигналы
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" :class="{ active: activeTab === 'analysis' }" href="#" @click.prevent="activeTab='analysis'">
-                        <i class="bi bi-file-earmark-text me-1"></i>Анализ
+                        <span v-if="signals.length" class="badge bg-secondary ms-1" style="font-size:0.6rem;">{{ signals.length }}</span>
                     </a>
                 </li>
             </ul>
 
-            <!-- News Tab -->
+            <!-- ===== Chart Tab ===== -->
+            <div v-show="activeTab === 'chart'">
+                <div class="d-flex align-items-center gap-2 mb-3 flex-wrap">
+                    <div class="btn-group btn-group-sm">
+                        <button v-for="iv in INTERVALS" :key="iv.value"
+                                class="btn" :class="interval===iv.value ? 'btn-primary' : 'btn-outline-secondary'"
+                                @click="interval = iv.value">
+                            {{ iv.label }}
+                        </button>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button v-for="d in DAYS_OPTIONS" :key="d.value"
+                                class="btn" :class="days===d.value ? 'btn-primary' : 'btn-outline-secondary'"
+                                @click="days = d.value">
+                            {{ d.label }}
+                        </button>
+                    </div>
+                    <div v-if="chartLoading" class="ms-2">
+                        <div class="spinner-border spinner-border-sm text-accent"></div>
+                    </div>
+                </div>
+                <div class="mp-card mb-4">
+                    <div id="stock-chart" class="mp-chart-container-full"></div>
+                </div>
+            </div>
+
+            <!-- ===== Order Book Tab ===== -->
+            <div v-if="activeTab === 'orderbook'">
+                <div class="d-flex align-items-center gap-2 mb-3">
+                    <button class="btn btn-sm btn-accent" @click="fetchOrderBook" :disabled="obLoading">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Обновить
+                    </button>
+                    <span class="text-muted" style="font-size:0.75rem;">Авто-обновление каждые 10с</span>
+                    <span v-if="obLoading" class="ms-2">
+                        <div class="spinner-border spinner-border-sm text-accent"></div>
+                    </span>
+                </div>
+
+                <div v-if="obError" class="alert alert-danger" style="background:rgba(248,81,73,0.15);border-color:var(--mp-red);color:var(--mp-red);">
+                    <i class="bi bi-exclamation-triangle me-1"></i>{{ obError }}
+                    <div class="mt-1 text-muted" style="font-size:0.75rem;">
+                        Стакан требует авторизации MOEX Passport. Укажите MOEX_PASSPORT_LOGIN и MOEX_PASSPORT_PASSWORD в .env
+                    </div>
+                </div>
+
+                <!-- Anomalies -->
+                <div v-if="obAnomalies.length > 0" class="mp-card mb-3">
+                    <div class="mp-card-header">
+                        <h6 class="mp-card-header__title"><i class="bi bi-exclamation-diamond me-1"></i>Аномалии</h6>
+                    </div>
+                    <div class="mp-card-body">
+                        <div v-for="(a, idx) in obAnomalies" :key="idx" class="d-flex align-items-start mb-2 pb-2" style="border-bottom:1px solid var(--mp-border-light);">
+                            <span class="badge me-2 mt-1" :class="severityBadge(a.severity)" style="font-size:0.65rem;">{{ a.severity }}</span>
+                            <div>
+                                <div style="font-size:0.85rem;">{{ a.message }}</div>
+                                <div class="text-muted" style="font-size:0.7rem;">{{ a.type }}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div v-if="!orderbook && !obLoading && !obError" class="mp-empty">
+                    <i class="bi bi-bar-chart-steps"></i>
+                    <div>Стакан загружается...</div>
+                </div>
+
+                <!-- Order book data -->
+                <div v-if="orderbook" class="row g-3">
+                    <!-- Summary -->
+                    <div class="col-12">
+                        <div class="mp-card">
+                            <div class="mp-card-body">
+                                <div class="row g-3 text-center">
+                                    <div class="col-md-2">
+                                        <div class="mp-stat__value" style="font-size:1.2rem;">{{ fmtPrice(orderbook.spread) }}</div>
+                                        <div class="mp-stat__label">Спред ({{ orderbook.spread_pct ? orderbook.spread_pct.toFixed(3) + '%' : '\u2014' }})</div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="mp-stat__value text-up" style="font-size:1.2rem;">{{ fmtVolume(orderbook.bid_volume) }}</div>
+                                        <div class="mp-stat__label">Bid</div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="mp-stat__value text-down" style="font-size:1.2rem;">{{ fmtVolume(orderbook.ask_volume) }}</div>
+                                        <div class="mp-stat__label">Ask</div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="mp-stat__value" style="font-size:1.2rem;" :style="{ color: imbalanceColor(orderbook.imbalance) }">
+                                            {{ orderbook.imbalance ? (orderbook.imbalance * 100).toFixed(1) + '%' : '0%' }}
+                                        </div>
+                                        <div class="mp-stat__label">Дисбаланс</div>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <div class="mp-stat__value" style="font-size:1.2rem;">{{ (orderbook.bids || []).length + (orderbook.asks || []).length }}</div>
+                                        <div class="mp-stat__label">Уровней</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Bids -->
+                    <div class="col-md-6">
+                        <div class="mp-card">
+                            <div class="mp-card-header">
+                                <h6 class="mp-card-header__title text-up"><i class="bi bi-arrow-up-circle me-1"></i>Покупки (Bid)</h6>
+                            </div>
+                            <div class="mp-card-body p-0">
+                                <table class="mp-table" style="font-size:0.8rem;">
+                                    <thead><tr><th class="text-end">Цена</th><th class="text-end">Объём</th><th>Визуально</th></tr></thead>
+                                    <tbody>
+                                        <tr v-for="(b, i) in (orderbook.bids || []).slice(0, 20)" :key="'b'+i">
+                                            <td class="text-end font-monospace text-up">{{ fmtPrice(b.price) }}</td>
+                                            <td class="text-end font-monospace">{{ fmtVolume(b.quantity) }}</td>
+                                            <td>
+                                                <div style="height:14px;background:rgba(63,185,80,0.3);border-radius:2px;"
+                                                     :style="{ width: Math.min(b.quantity / (orderbook.bid_volume / (orderbook.bids||[]).length || 1) * 30, 100) + '%' }"></div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Asks -->
+                    <div class="col-md-6">
+                        <div class="mp-card">
+                            <div class="mp-card-header">
+                                <h6 class="mp-card-header__title text-down"><i class="bi bi-arrow-down-circle me-1"></i>Продажи (Ask)</h6>
+                            </div>
+                            <div class="mp-card-body p-0">
+                                <table class="mp-table" style="font-size:0.8rem;">
+                                    <thead><tr><th class="text-end">Цена</th><th class="text-end">Объём</th><th>Визуально</th></tr></thead>
+                                    <tbody>
+                                        <tr v-for="(a, i) in (orderbook.asks || []).slice(0, 20)" :key="'a'+i">
+                                            <td class="text-end font-monospace text-down">{{ fmtPrice(a.price) }}</td>
+                                            <td class="text-end font-monospace">{{ fmtVolume(a.quantity) }}</td>
+                                            <td>
+                                                <div style="height:14px;background:rgba(248,81,73,0.3);border-radius:2px;"
+                                                     :style="{ width: Math.min(a.quantity / (orderbook.ask_volume / (orderbook.asks||[]).length || 1) * 30, 100) + '%' }"></div>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== News Tab ===== -->
             <div v-if="activeTab === 'news'">
                 <div v-if="newsLoading" class="mp-loading">
                     <div class="spinner-border spinner-border-sm text-accent me-2"></div>
@@ -421,7 +635,7 @@
                 </div>
             </div>
 
-            <!-- Signals Tab -->
+            <!-- ===== Signals Tab ===== -->
             <div v-if="activeTab === 'signals'">
                 <div v-if="signalsLoading" class="mp-loading">
                     <div class="spinner-border spinner-border-sm text-accent me-2"></div>
@@ -460,15 +674,6 @@
                             </tr>
                         </tbody>
                     </table>
-                </div>
-            </div>
-
-            <!-- Analysis Tab -->
-            <div v-if="activeTab === 'analysis'">
-                <div class="mp-empty">
-                    <i class="bi bi-file-earmark-text"></i>
-                    <div>Аналитические отчёты</div>
-                    <small class="text-muted">Отчёты LLM-анализа будут доступны после обработки новостей</small>
                 </div>
             </div>
         </div>

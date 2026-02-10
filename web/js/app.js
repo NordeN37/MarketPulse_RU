@@ -22,7 +22,6 @@
         { path: '/signals',         component: window.PageSignals,     meta: { title: 'Сигналы' } },
         { path: '/news',            component: window.PageNews,        meta: { title: 'Новости' } },
         { path: '/llm-stats',       component: window.PageLLMStats,    meta: { title: 'LLM Провайдеры' } },
-        { path: '/orderbook',       component: window.PageOrderBook,   meta: { title: 'Стакан' } },
         { path: '/tinvest',         component: window.PageTInvest,     meta: { title: 'Т-Инвестиции' } },
         { path: '/settings',        component: window.PageSettings,    meta: { title: 'Настройки' } }
     ];
@@ -52,7 +51,6 @@
                 { path: '/signals',    label: 'Сигналы',    icon: 'bi-lightning-charge' },
                 { path: '/news',       label: 'Новости',    icon: 'bi-newspaper' },
                 { path: '/llm-stats',  label: 'LLM',        icon: 'bi-cpu' },
-                { path: '/orderbook',  label: 'Стакан',     icon: 'bi-bar-chart-steps' },
                 { path: '/tinvest',    label: 'Т-Инвест',  icon: 'bi-bank' },
                 { path: '/settings',   label: 'Настройки',  icon: 'bi-gear' }
             ];
