@@ -246,6 +246,7 @@ func (u *Userbot) handleChannelMessage(ctx context.Context, upd mtproto.TL_updat
 		SourceChannel: channelName,
 		Title:         "",
 		Content:       msg.Message,
+		URL:           extractFirstURL(msg.Message),
 		PublishedAt:   time.Unix(int64(msg.Date), 0),
 		CollectedAt:   time.Now(),
 		RawJSON:       rawData,

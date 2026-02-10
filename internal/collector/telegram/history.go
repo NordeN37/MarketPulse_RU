@@ -195,6 +195,7 @@ func (h *HistoryReader) readChannelHistory(ctx context.Context, client *tgclient
 				SourceChannel: username,
 				Title:         "",
 				Content:       msg.Message,
+				URL:           extractFirstURL(msg.Message),
 				PublishedAt:   time.Unix(int64(msg.Date), 0),
 				CollectedAt:   time.Now(),
 				RawJSON:       rawData,
